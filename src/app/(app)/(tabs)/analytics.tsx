@@ -239,21 +239,24 @@ export default function Analytics() {
   // Warning metrics configurations
   const showWarning = usagePercentage >= 80 && budgetLimit > 0;
   let warnColor = "text-accentCyan";
+  let warnIconColor = "#00F5D4";
   let warnBg = "bg-accentCyan/10 border-accentCyan/20";
   let warnText = `You have used ${usagePercentage.toFixed(0)}% of your monthly budget limit.`;
 
   if (isExceeded) {
     warnColor = "text-accentPink";
+    warnIconColor = "#FF007F";
     warnBg = "bg-accentPink/10 border-accentPink/20";
     warnText = `Warning: Monthly budget limit exceeded by ₹${(totalSpentCurMonth - budgetLimit).toFixed(2)}!`;
   } else if (usagePercentage >= 90) {
     warnColor = "text-amber-500";
+    warnIconColor = "#F59E0B";
     warnBg = "bg-amber-500/10 border-amber-500/20";
     warnText = `Caution: Budget usage is currently at ${usagePercentage.toFixed(0)}%!`;
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-background">
+    <SafeAreaView style={{ flex: 1, backgroundColor: "#0D0D0D" }}>
       <ScrollView className="flex-1 px-6" contentContainerStyle={{ paddingBottom: 50 }}>
         {/* Header */}
       <View className="flex-row justify-between items-center mb-8">
@@ -272,7 +275,7 @@ export default function Analytics() {
       {/* WARNING BANNER CONTAINER */}
       {showWarning && (
         <View className={`flex-row items-center border-[0.5px] p-4 rounded-xl mb-6 ${warnBg}`}>
-          <AlertTriangle size={18} className={warnColor} />
+          <AlertTriangle size={18} color={warnIconColor} />
           <Text className={`text-xs font-semibold ml-2.5 flex-1 leading-relaxed ${warnColor}`}>
             {warnText}
           </Text>

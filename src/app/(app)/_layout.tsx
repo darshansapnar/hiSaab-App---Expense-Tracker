@@ -6,11 +6,11 @@ import { useRealtimeSync } from "../../hooks/useRealtimeSync";
 
 export default function AppLayout() {
   const session = useAuthStore((state) => state.session);
+  const profile = useAuthStore((state) => state.profile);
   const isLoading = useAuthStore((state) => state.isLoading);
 
   // Mount global realtime listener sync
   useRealtimeSync();
-
 
   // Show skeletal spinner while session loading/retrieving completes
   if (isLoading) {
@@ -26,16 +26,13 @@ export default function AppLayout() {
     return <Redirect href="/(auth)/login" />;
   }
 
-  const profile = useAuthStore((state) => state.profile);
-
-  // If display name is not configured, redirect to profile setup onboarding
-  if (!profile?.display_name) {
+  // If onboarding is not completed, redirect to profile setup
+  if (!profile?.onboarding_completed) {
     return <Redirect href="/(auth)/profile-setup" />;
   }
 
   return (
     <Stack
-
       screenOptions={{
         headerShown: false,
         contentStyle: { backgroundColor: "#0D0D0D" },

@@ -19,6 +19,7 @@
     "expo-haptics": "~15.0.8",
     "expo-image": "~3.0.11",
     "expo-image-picker": "~17.0.11",
+    "expo-linear-gradient": "~15.0.8",
     "expo-linking": "~8.0.12",
     "expo-notifications": "~0.32.17",
     "expo-router": "~6.0.24",
@@ -47,16 +48,20 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@testing-library/react-native": "^14.0.1",
+    "@types/jest": "^30.0.0",
     "@types/react": "~19.1.10",
     "babel-preset-expo": "~54.0.0",
     "eslint": "^10.7.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.6",
     "husky": "^9.1.7",
+    "jest": "^30.4.2",
     "lint-staged": "^16.4.0",
     "postcss": "^8.5.19",
     "prettier": "^3.9.5",
     "tailwindcss": "^3.4.19",
+    "ts-jest": "^29.4.11",
     "typescript": "~5.9.2"
   },
   "scripts": {
@@ -66,7 +71,8 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "prepare": "husky"
+    "prepare": "husky",
+    "test": "jest"
   },
   "private": true
 }

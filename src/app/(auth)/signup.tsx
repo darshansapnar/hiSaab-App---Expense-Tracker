@@ -54,8 +54,10 @@ export default function Signup() {
         showToast(error.message, "error");
       } else {
         Theme.haptics.success();
-        showToast("Registration successful! Check email for validation.", "success", 5000);
-        router.replace("/(auth)/login");
+        showToast("Registration successful!", "success", 5000);
+        // Navigate to root index so the auth guard re-evaluates
+        // If email confirmation is off, this auto-redirects to profile-setup
+        router.replace("/");
       }
     } catch (e) {
       showToast("An unexpected error occurred", "error");

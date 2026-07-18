@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
   View,
@@ -9,6 +9,7 @@ import {
   FlatList,
   Modal,
   ScrollView,
+  RefreshControl,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -24,12 +25,46 @@ import {
   Trash2,
   Edit,
   Save,
-  Filter,
-  ArrowRight,
+  Info,
+  TrendingDown,
+  TrendingUp,
+  AlertCircle,
+  Copy
 } from "lucide-react-native";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
+
+const taglines = [
+  "Paisa gaya, record toh karo 😅",
+  "Chai peene se pehle expense add kar 😄",
+  "Future wala tum thank you bolega.",
+  "Kharcha likh, tension nahi.",
+  "Salary nahi hai, hisaab toh hai.",
+  "Bro... ₹20 bhi count hota hai.",
+  "Control your spending before your spending controls you.",
+  "Kharcha kam, savings zyada."
+];
+
+const successMessages = [
+  "Kharcha added 😅",
+  "Wallet crying... entry saved.",
+  "Another expense? Rich people problems 😂",
+  "Hisaab updated successfully.",
+  "Future you says thanks 🙌"
+];
+
+const getCategoryEmoji = (catName: string) => {
+  const name = catName.toLowerCase();
+  if (name.includes("food") || name.includes("eat") || name.includes("restaurant") || name.includes("utensil")) return "🍕";
+  if (name.includes("rent") || name.includes("home") || name.includes("flat") || name.includes("room")) return "🏠";
+  if (name.includes("travel") || name.includes("cab") || name.includes("ride") || name.includes("auto") || name.includes("fuel")) return "🚗";
+  if (name.includes("water")) return "💧";
+  if (name.includes("tiffin")) return "🍱";
+  if (name.includes("shopping") || name.includes("clothes") || name.includes("grocer")) return "🛒";
+  if (name.includes("bill") || name.includes("recharge") || name.includes("electricity")) return "⚡";
+  return "💸";
+};
 
 const personalExpenseSchema = z.object({
   amount: z.string().refine((val) => !isNaN(Number(val)) && Number(val) > 0, {
@@ -37,8 +72,9 @@ const personalExpenseSchema = z.object({
   }),
   description: z
     .string()
-    .min(3, "Description must be at least 3 characters")
-    .max(100, "Description must be under 100 characters"),
+    .max(100, "Description must be under 100 characters")
+    .optional()
+    .or(z.literal("")),
   categoryId: z.string().uuid("Please select a category"),
 });
 
@@ -50,14 +86,23 @@ export default function PersonalExpenses() {
   const user = useAuthStore((state) => state.user);
   const showToast = useToastStore((state) => state.showToast);
 
+  const [tagline, setTagline] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string | null>(null);
+  const [dateFilter, setDateFilter] = useState<"all" | "today" | "week" | "month">("all");
 
   const [isOpen, setIsOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<any | null>(null);
+  const [longPressedExpense, setLongPressedExpense] = useState<any | null>(null);
+  const [isActionMenuOpen, setIsActionMenuOpen] = useState(false);
+
+  useEffect(() => {
+    const randomTag = taglines[Math.floor(Math.random() * taglines.length)];
+    setTagline(randomTag);
+  }, []);
 
   // 1. Fetch personal expenses listing
-  const { data: expenses, isLoading: isExpensesLoading } = useQuery({
+  const { data: expenses, isLoading: isExpensesLoading, refetch, isRefetching } = useQuery({
     queryKey: ["personal-expenses", user?.id],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -82,6 +127,21 @@ export default function PersonalExpenses() {
     },
   });
 
+  // 3. Fetch budget
+  const { data: budget } = useQuery({
+    queryKey: ["budget", user?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("budgets")
+        .select("*")
+        .eq("profile_id", user?.id)
+        .single();
+      if (error && error.code !== "PGRST116") throw error;
+      return data || null;
+    },
+    enabled: !!user?.id,
+  });
+
   const {
     control,
     handleSubmit,
@@ -97,7 +157,6 @@ export default function PersonalExpenses() {
     },
   });
 
-  // Handle open modal for creation
   const handleOpenAdd = () => {
     Theme.haptics.light();
     setEditingExpense(null);
@@ -109,7 +168,6 @@ export default function PersonalExpenses() {
     setIsOpen(true);
   };
 
-  // Handle open modal for edit
   const handleOpenEdit = (expense: any) => {
     Theme.haptics.light();
     setEditingExpense(expense);
@@ -121,13 +179,29 @@ export default function PersonalExpenses() {
     setIsOpen(true);
   };
 
-  // Mutation to create/update personal expense
+  const handleQuickAdd = (type: "tea" | "biscuit") => {
+    Theme.haptics.light();
+    const foodCategory = categories?.find(
+      (cat: any) => cat.name.toLowerCase().includes("food") || cat.name.toLowerCase().includes("eat")
+    );
+    const catId = foodCategory ? foodCategory.id : (categories?.[0]?.id || "");
+    
+    setEditingExpense(null);
+    reset({
+      amount: type === "tea" ? "10" : "5",
+      description: type === "tea" ? "Tea" : "Biscuit",
+      categoryId: catId,
+    });
+    setIsOpen(true);
+  };
+
   const saveMutation = useMutation({
     mutationFn: async (data: PersonalExpenseSchema) => {
+      const categoryName = categories?.find((c: any) => c.id === data.categoryId)?.name || "Expense";
       const payload = {
         profile_id: user?.id,
         amount: Number(data.amount),
-        description: data.description.trim(),
+        description: data.description?.trim() || categoryName,
         category_id: data.categoryId,
       };
 
@@ -145,8 +219,9 @@ export default function PersonalExpenses() {
     onSuccess: () => {
       Theme.haptics.success();
       queryClient.invalidateQueries({ queryKey: ["personal-expenses", user?.id] });
+      const randomMsg = successMessages[Math.floor(Math.random() * successMessages.length)];
       showToast(
-        editingExpense ? "Expense updated successfully" : "Expense added successfully",
+        editingExpense ? "Expense updated successfully" : randomMsg,
         "success"
       );
       setIsOpen(false);
@@ -158,7 +233,6 @@ export default function PersonalExpenses() {
     },
   });
 
-  // Mutation to delete personal expense
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase.from("personal_expenses").delete().eq("id", id);
@@ -169,6 +243,7 @@ export default function PersonalExpenses() {
       queryClient.invalidateQueries({ queryKey: ["personal-expenses", user?.id] });
       showToast("Expense deleted successfully", "success");
       setIsOpen(false);
+      setIsActionMenuOpen(false);
     },
     onError: (error: any) => {
       Theme.haptics.error();
@@ -176,221 +251,569 @@ export default function PersonalExpenses() {
     },
   });
 
-  // --- MATH CALCULATION FOR MONTHLY SUMMARY ---
-  const currentMonthStart = new Date();
-  currentMonthStart.setDate(1);
-  currentMonthStart.setHours(0, 0, 0, 0);
-
-  const monthlyExpenses = expenses?.filter(
-    (exp) => new Date(exp.expense_date) >= currentMonthStart
-  );
-
-  const monthlyTotal =
-    monthlyExpenses?.reduce((sum, exp) => sum + Number(exp.amount), 0) || 0;
-
-  // Category breakdown for current month
-  const categoryBreakdown: Record<string, { amount: number; name: string }> = {};
-  monthlyExpenses?.forEach((exp) => {
-    const catName = exp.category?.name || "Other";
-    if (!categoryBreakdown[catName]) {
-      categoryBreakdown[catName] = { amount: 0, name: catName };
+  const handleDuplicate = async (expense: any) => {
+    Theme.haptics.medium();
+    const payload = {
+      profile_id: user?.id,
+      amount: expense.amount,
+      description: `${expense.description} (Copy)`,
+      category_id: expense.category_id,
+    };
+    const { error } = await supabase.from("personal_expenses").insert(payload);
+    if (error) {
+      showToast("Failed to duplicate expense", "error");
+    } else {
+      queryClient.invalidateQueries({ queryKey: ["personal-expenses", user?.id] });
+      showToast("Expense duplicated!", "success");
     }
-    categoryBreakdown[catName].amount += Number(exp.amount);
-  });
+    setIsActionMenuOpen(false);
+  };
 
-  // Filter list by search query and category filters
-  const filteredExpenses = expenses?.filter((exp) => {
-    const matchesSearch = exp.description.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory = selectedCategoryFilter
-      ? exp.category_id === selectedCategoryFilter
-      : true;
-    return matchesSearch && matchesCategory;
-  });
+  // --- STATS CALCULATIONS ---
+  const dashboardStats = useMemo(() => {
+    let monthlyTotal = 0;
+    let todayTotal = 0;
+    let weeklyTotal = 0;
+    let totalTransactions = expenses?.length || 0;
+    let biggestExpense = 0;
+
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+
+    expenses?.forEach((exp) => {
+      const amt = Number(exp.amount) || 0;
+      const date = new Date(exp.expense_date);
+
+      // Monthly Spent
+      if (date >= startOfMonth) {
+        monthlyTotal += amt;
+      }
+
+      // Today Spent
+      const expDay = new Date(exp.expense_date);
+      expDay.setHours(0, 0, 0, 0);
+      if (expDay.getTime() === today.getTime()) {
+        todayTotal += amt;
+      }
+
+      // Weekly Spent
+      if (date >= oneWeekAgo) {
+        weeklyTotal += amt;
+      }
+
+      // Biggest Expense
+      if (amt > biggestExpense) {
+        biggestExpense = amt;
+      }
+    });
+
+    const currentDay = new Date().getDate();
+    const dailyAverage = currentDay > 0 ? monthlyTotal / currentDay : 0;
+    const moneyLeft = budget ? Number(budget.amount) - monthlyTotal : null;
+
+    return {
+      monthlyTotal,
+      todayTotal,
+      weeklyTotal,
+      totalTransactions,
+      biggestExpense,
+      dailyAverage,
+      moneyLeft,
+    };
+  }, [expenses, budget]);
+
+  // MONTHLY DYNAMIC INSIGHTS ENGINE
+  const insights = useMemo(() => {
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+
+    const monthlyExpenses = expenses?.filter((exp) => new Date(exp.expense_date) >= startOfMonth) || [];
+
+    if (monthlyExpenses.length === 0) {
+      return null;
+    }
+
+    let totalSpent = 0;
+    let biggestExpense = 0;
+    
+    // Unique days count
+    const uniqueDays = new Set<string>();
+    
+    // Category mapping
+    const catMap: Record<string, number> = {};
+
+    monthlyExpenses.forEach((exp) => {
+      const amt = Number(exp.amount) || 0;
+      totalSpent += amt;
+
+      // Biggest single cost
+      if (amt > biggestExpense) {
+        biggestExpense = amt;
+      }
+
+      // Track unique days (date part only)
+      if (exp.expense_date) {
+        const dayStr = exp.expense_date.split("T")[0];
+        uniqueDays.add(dayStr);
+      }
+
+      // Track category totals
+      const catName = exp.category?.name || "Other";
+      catMap[catName] = (catMap[catName] || 0) + amt;
+    });
+
+    const daysCount = uniqueDays.size;
+    const avgDailySpending = daysCount > 0 ? totalSpent / daysCount : 0;
+
+    // Most spent category
+    let topCategory = "";
+    let maxCatAmt = 0;
+    Object.entries(catMap).forEach(([name, amt]) => {
+      if (amt > maxCatAmt) {
+        maxCatAmt = amt;
+        topCategory = name;
+      }
+    });
+
+    return {
+      totalSpent,
+      avgDailySpending,
+      topCategory: topCategory ? `${topCategory} ${getCategoryEmoji(topCategory)}` : "Other 💸",
+      biggestExpense,
+    };
+  }, [expenses]);
+
+  // FILTERED LEDGER LIST
+  const filteredExpenses = useMemo(() => {
+    return expenses?.filter((exp) => {
+      const matchesSearch = exp.description.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesCategory = selectedCategoryFilter
+        ? exp.category_id === selectedCategoryFilter
+        : true;
+
+      const date = new Date(exp.expense_date);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      let matchesDate = true;
+      if (dateFilter === "today") {
+        const expDay = new Date(exp.expense_date);
+        expDay.setHours(0, 0, 0, 0);
+        matchesDate = expDay.getTime() === today.getTime();
+      } else if (dateFilter === "week") {
+        const oneWeekAgo = new Date();
+        oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+        matchesDate = date >= oneWeekAgo;
+      } else if (dateFilter === "month") {
+        const startOfMonth = new Date();
+        startOfMonth.setDate(1);
+        startOfMonth.setHours(0, 0, 0, 0);
+        matchesDate = date >= startOfMonth;
+      }
+
+      return matchesSearch && matchesCategory && matchesDate;
+    });
+  }, [expenses, searchQuery, selectedCategoryFilter, dateFilter]);
+
+
+
+  const formatRupees = (amount: number) => {
+    return `₹${amount.toLocaleString("en-IN")}`;
+  };
 
   if (isExpensesLoading || isCategoriesLoading) {
     return (
-      <View className="flex-1 justify-center items-center bg-background">
-        <ActivityIndicator size="large" color="#00F5D4" />
+      <View style={{ flex: 1, backgroundColor: "#0B1220" }} className="justify-center items-center">
+        <ActivityIndicator size="large" color="#14E5D4" />
       </View>
     );
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-background px-6">
-      {/* Header */}
-      <View className="flex-row justify-between items-center mb-6">
-        <TouchableOpacity
-          onPress={() => {
-            Theme.haptics.light();
-            router.back();
-          }}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          className="p-1 rounded-full bg-surfaceLight border-[0.5px] border-border"
-        >
-          <ChevronLeft size={20} color="#00F5D4" />
-        </TouchableOpacity>
-        <Text className="text-white text-lg font-bold">Personal Ledger</Text>
-        <TouchableOpacity
-          onPress={handleOpenAdd}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          className="p-1 rounded-full bg-accentCyan active:scale-95"
-        >
-          <Plus size={20} color="#0D0D0D" />
-        </TouchableOpacity>
-      </View>
-
-      {/* MONTHLY SUMMARY CARD */}
-      <View className="bg-surface border-[0.5px] border-border rounded-2xl p-5 mb-6">
-        <Text className="text-accentGray text-[10px] font-bold uppercase tracking-widest mb-1">
-          Spent This Month
-        </Text>
-        <Text className="text-white text-3xl font-black mb-4">₹ {monthlyTotal.toFixed(2)}</Text>
-
-        <Text className="text-accentGray text-[9px] font-bold uppercase tracking-widest mb-2">
-          Category Summary
-        </Text>
-        <View className="flex-row flex-wrap gap-2">
-          {Object.values(categoryBreakdown).map((item) => (
-            <View key={item.name} className="bg-surfaceLight px-2.5 py-1.5 rounded-lg">
-              <Text className="text-white text-[10px] font-bold">
-                {item.name}: ₹{item.amount.toFixed(0)}
-              </Text>
-            </View>
-          ))}
-          {Object.keys(categoryBreakdown).length === 0 && (
-            <Text className="text-accentGray text-[10px]">No expenses logged this month.</Text>
-          )}
-        </View>
-      </View>
-
-      {/* SEARCH AND FILTERS */}
-      <View className="mb-6 space-y-3">
-        {/* Search bar */}
-        <View className="flex-row items-center bg-surface border-[0.5px] border-border rounded-xl px-3 py-2">
-          <Search size={18} color="#666666" className="mr-2" />
-          <TextInput
-            className="flex-1 text-white text-sm"
-            placeholder="Search description..."
-            placeholderTextColor="#666666"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-        </View>
-
-        {/* Category Pills horizontal filters list */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} className="flex-row">
+    <SafeAreaView style={{ flex: 1, backgroundColor: "#0B1220" }}>
+      {/* Scrollable Container with Pull-to-Refresh */}
+      <ScrollView
+        className="flex-1 px-6"
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 100 }}
+        refreshControl={
+          <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor="#14E5D4" />
+        }
+      >
+        {/* Navigation & Header */}
+        <View className="flex-row justify-between items-center mt-2 mb-6">
           <TouchableOpacity
             onPress={() => {
               Theme.haptics.light();
-              setSelectedCategoryFilter(null);
+              router.back();
             }}
-            className={`px-3.5 py-2 rounded-xl mr-2 border-[0.5px] ${
-              selectedCategoryFilter === null
-                ? "bg-accentCyan/10 border-accentCyan"
-                : "bg-surface border-border"
-            }`}
+            className="p-1 rounded-full bg-[#151E2E] border-[0.5px] border-white/10"
           >
-            <Text
-              className={`text-xs font-bold ${
-                selectedCategoryFilter === null ? "text-accentCyan" : "text-accentGray"
-              }`}
-            >
-              All
-            </Text>
+            <ChevronLeft size={20} color="#14E5D4" />
           </TouchableOpacity>
-          {categories?.map((cat: any) => {
-            const isSelected = selectedCategoryFilter === cat.id;
-            return (
+          <View className="items-center">
+            <Text className="text-white text-lg font-bold">My Expenses</Text>
+            <Text className="text-[#94A3B8] text-[10px] mt-0.5">{tagline || "Every rupee has a story 💸"}</Text>
+          </View>
+          <View className="w-8" />
+        </View>
+
+        {/* 2X2 SUMMARY STATS CARDS */}
+        <View className="flex-row flex-wrap gap-3 mb-6">
+          {/* Card 1: Spent this month */}
+          <View className="w-[48%] bg-[#151E2E] border-[0.5px] border-white/5 p-4 rounded-2xl shadow-lg flex-col justify-between">
+            <View>
+              <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-wider">Spent This Month</Text>
+              <Text className="text-[#94A3B8] text-[9px] mt-0.5 mb-1.5">Current billing cycle</Text>
+            </View>
+            <Text className="text-[#14E5D4] text-2xl font-black">{formatRupees(dashboardStats.monthlyTotal)}</Text>
+          </View>
+
+          {/* Card 2: Today's spending */}
+          <View className="w-[48%] bg-[#151E2E] border-[0.5px] border-white/5 p-4 rounded-2xl shadow-lg flex-col justify-between">
+            <View>
+              <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-wider">Today's Spending</Text>
+              <Text className="text-[#94A3B8] text-[9px] mt-0.5 mb-1.5">Spent today</Text>
+            </View>
+            <Text className="text-white text-2xl font-black">{formatRupees(dashboardStats.todayTotal)}</Text>
+          </View>
+
+          {/* Card 3: Total Transactions */}
+          <View className="w-[48%] bg-[#151E2E] border-[0.5px] border-white/5 p-4 rounded-2xl shadow-lg flex-col justify-between">
+            <View>
+              <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-wider">Transactions</Text>
+              <Text className="text-[#94A3B8] text-[9px] mt-0.5 mb-1.5">All-time count</Text>
+            </View>
+            <Text className="text-[#94A3B8] text-2xl font-black">{dashboardStats.totalTransactions}</Text>
+          </View>
+
+          {/* Card 4: Biggest Expense */}
+          <View className="w-[48%] bg-[#151E2E] border-[0.5px] border-white/5 p-4 rounded-2xl shadow-lg flex-col justify-between">
+            <View>
+              <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-wider">Biggest Expense</Text>
+              <Text className="text-[#94A3B8] text-[9px] mt-0.5 mb-1.5">Peak single cost</Text>
+            </View>
+            <Text className="text-[#EF4444] text-2xl font-black">{formatRupees(dashboardStats.biggestExpense)}</Text>
+          </View>
+        </View>
+
+        {/* QUICK STATS PANEL */}
+        <View className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-4 mb-6 shadow-md">
+          <Text className="text-[#94A3B8] text-[10px] font-bold uppercase tracking-wider mb-3">Quick Stats</Text>
+          <View className="flex-row justify-between flex-wrap gap-y-2">
+            <View className="w-[48%]">
+              <Text className="text-[#94A3B8] text-[9px]">Daily Average</Text>
+              <Text className="text-white text-sm font-bold mt-0.5">{formatRupees(Math.round(dashboardStats.dailyAverage))}</Text>
+            </View>
+            <View className="w-[48%]">
+              <Text className="text-[#94A3B8] text-[9px]">This Week</Text>
+              <Text className="text-white text-sm font-bold mt-0.5">{formatRupees(dashboardStats.weeklyTotal)}</Text>
+            </View>
+            {dashboardStats.moneyLeft !== null && (
+              <View className="w-[48%] mt-2">
+                <Text className="text-[#94A3B8] text-[9px]">Money Left (Budget)</Text>
+                <Text className={`text-sm font-bold mt-0.5 ${dashboardStats.moneyLeft < 0 ? "text-[#EF4444]" : "text-[#22C55E]"}`}>
+                  {formatRupees(dashboardStats.moneyLeft)}
+                </Text>
+              </View>
+            )}
+          </View>
+        </View>
+
+        {/* QUICK ADD SECTION */}
+        <View className="mb-6 bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-4 shadow-md">
+          <Text className="text-white text-sm font-black mb-0.5">Quick Add</Text>
+          <Text className="text-[#94A3B8] text-[9px] mb-3">Daily kharcha, one tap away ☕</Text>
+          <View className="flex-row space-x-3.5 gap-2.5">
+            <TouchableOpacity
+              onPress={() => handleQuickAdd("tea")}
+              className="flex-row items-center bg-white/5 border border-white/10 px-4 py-2.5 rounded-full active:scale-95 shadow-sm"
+            >
+              <Text className="text-sm mr-1.5">☕</Text>
+              <Text className="text-white text-xs font-bold mr-1.5">Tea</Text>
+              <Text className="text-[#14E5D4] text-xs font-black">₹10</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => handleQuickAdd("biscuit")}
+              className="flex-row items-center bg-white/5 border border-white/10 px-4 py-2.5 rounded-full active:scale-95 shadow-sm"
+            >
+              <Text className="text-sm mr-1.5">🍪</Text>
+              <Text className="text-white text-xs font-bold mr-1.5">Biscuit</Text>
+              <Text className="text-[#14E5D4] text-xs font-black">₹5</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* SEARCH BAR */}
+        <View className="flex-row items-center bg-[#151E2E] border-[0.5px] border-white/5 rounded-xl px-3.5 py-2.5 mb-4 shadow-sm">
+          <Search size={16} color="#94A3B8" className="mr-2" />
+          <TextInput
+            className="flex-1 text-white text-sm py-1"
+            placeholder="Search your expenses..."
+            placeholderTextColor="#94A3B8"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+          {searchQuery !== "" && (
+            <TouchableOpacity onPress={() => setSearchQuery("")}>
+              <X size={16} color="#94A3B8" />
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* CHIP FILTERS FOR TIME AND CATEGORY */}
+        <View className="mb-6 space-y-3">
+          {/* Time range filters */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} className="flex-row pb-1">
+            {[
+              { id: "all", label: "All Time" },
+              { id: "today", label: "Today" },
+              { id: "week", label: "This Week" },
+              { id: "month", label: "This Month" }
+            ].map((item) => (
               <TouchableOpacity
-                key={cat.id}
+                key={item.id}
                 onPress={() => {
                   Theme.haptics.light();
-                  setSelectedCategoryFilter(cat.id);
+                  setDateFilter(item.id as any);
                 }}
-                className={`px-3.5 py-2 rounded-xl mr-2 border-[0.5px] ${
-                  isSelected ? "bg-accentCyan/10 border-accentCyan" : "bg-surface border-border"
+                className={`px-3 py-1.5 rounded-lg mr-2 border-[0.5px] ${
+                  dateFilter === item.id ? "bg-[#14E5D4]/10 border-[#14E5D4]" : "bg-[#151E2E] border-white/10"
                 }`}
               >
-                <Text
-                  className={`text-xs font-bold ${
-                    isSelected ? "text-accentCyan" : "text-accentGray"
+                <Text className={`text-[10px] font-bold uppercase tracking-wider ${
+                  dateFilter === item.id ? "text-[#14E5D4]" : "text-[#94A3B8]"
+                }`}>{item.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          {/* Category filters */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} className="flex-row">
+            <TouchableOpacity
+              onPress={() => {
+                Theme.haptics.light();
+                setSelectedCategoryFilter(null);
+              }}
+              className={`px-3.5 py-2 rounded-xl mr-2 border-[0.5px] ${
+                selectedCategoryFilter === null ? "bg-[#14E5D4]/10 border-[#14E5D4]" : "bg-[#151E2E] border-white/5"
+              }`}
+            >
+              <Text className={`text-xs font-bold ${
+                selectedCategoryFilter === null ? "text-[#14E5D4]" : "text-[#94A3B8]"
+              }`}>All Categories</Text>
+            </TouchableOpacity>
+            {categories?.map((cat: any) => {
+              const isSelected = selectedCategoryFilter === cat.id;
+              return (
+                <TouchableOpacity
+                  key={cat.id}
+                  onPress={() => {
+                    Theme.haptics.light();
+                    setSelectedCategoryFilter(cat.id);
+                  }}
+                  className={`px-3.5 py-2 rounded-xl mr-2 border-[0.5px] ${
+                    isSelected ? "bg-[#14E5D4]/10 border-[#14E5D4]" : "bg-[#151E2E] border-white/5"
                   }`}
                 >
-                  {cat.name}
-                </Text>
+                  <Text className={`text-xs font-bold ${
+                    isSelected ? "text-[#14E5D4]" : "text-[#94A3B8]"
+                  }`}>{cat.name}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+
+        {/* MONTHLY INSIGHTS CARD */}
+        <View className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-5 mb-6 shadow-md">
+          <View className="flex-row items-center mb-3.5">
+            <Info size={16} color="#14E5D4" />
+            <Text className="text-white text-xs font-black ml-2 uppercase tracking-widest">Monthly Insights</Text>
+          </View>
+          
+          {insights ? (
+            <View className="space-y-3 mt-1">
+              <View className="flex-row justify-between items-center py-1.5 border-b border-white/5">
+                <Text className="text-[#94A3B8] text-[10px] font-medium">💰 Total Spent This Month</Text>
+                <Text className="text-white text-xs font-black">{formatRupees(insights.totalSpent)}</Text>
+              </View>
+              <View className="flex-row justify-between items-center py-1.5 border-b border-white/5">
+                <Text className="text-[#94A3B8] text-[10px] font-medium">📊 Average Daily Spending</Text>
+                <Text className="text-white text-xs font-black">{formatRupees(Math.round(insights.avgDailySpending))}</Text>
+              </View>
+              <View className="flex-row justify-between items-center py-1.5 border-b border-white/5">
+                <Text className="text-[#94A3B8] text-[10px] font-medium">🍕 Most Spent Category</Text>
+                <Text className="text-white text-xs font-black">{insights.topCategory}</Text>
+              </View>
+              <View className="flex-row justify-between items-center py-1.5">
+                <Text className="text-[#94A3B8] text-[10px] font-medium">💸 Biggest Expense</Text>
+                <Text className="text-white text-xs font-black">{formatRupees(insights.biggestExpense)}</Text>
+              </View>
+            </View>
+          ) : (
+            <View className="py-3 items-center">
+              <Text className="text-white text-xs font-bold text-center">No expenses this month yet.</Text>
+              <Text className="text-[#94A3B8] text-[10px] mt-1 text-center">Start adding expenses to see your insights.</Text>
+            </View>
+          )}
+        </View>
+
+        {/* DAILY LEDGER TRANSACTIONS LIST */}
+        <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-4">
+          Ledger
+        </Text>
+
+        <View className="space-y-3">
+          {filteredExpenses?.map((item) => {
+            const expDate = new Date(item.expense_date);
+            const timeStr = expDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+            return (
+              <TouchableOpacity
+                key={item.id}
+                onPress={() => handleOpenEdit(item)}
+                onLongPress={() => {
+                  Theme.haptics.medium();
+                  setLongPressedExpense(item);
+                  setIsActionMenuOpen(true);
+                }}
+                className="flex-row items-center bg-[#151E2E] border-[0.5px] border-white/5 p-4 rounded-2xl active:scale-[0.99] shadow-sm"
+              >
+                <View className="w-10 h-10 justify-center items-center rounded-xl bg-white/5 border border-white/10 mr-3">
+                  <Text className="text-lg">
+                    {getCategoryEmoji(item.category?.name || "")}
+                  </Text>
+                </View>
+                <View className="flex-1 mr-2">
+                  <Text className="text-white text-sm font-bold" numberOfLines={1}>
+                    {item.description}
+                  </Text>
+                  <Text className="text-[#94A3B8] text-[9px] mt-0.5" numberOfLines={1}>
+                    {item.category?.name || "Other"}
+                  </Text>
+                </View>
+                <View className="items-end">
+                  <Text className="text-white font-black text-sm">{formatRupees(item.amount)}</Text>
+                  <Text className="text-[#94A3B8] text-[8px] mt-0.5">
+                    {expDate.toLocaleDateString()} at {timeStr}
+                  </Text>
+                </View>
               </TouchableOpacity>
             );
           })}
-        </ScrollView>
-      </View>
 
-      {/* DAILY LEDGER LIST */}
-      <FlatList
-        data={filteredExpenses}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            onPress={() => handleOpenEdit(item)}
-            className="flex-row items-center bg-surface border-[0.5px] border-border p-4 rounded-xl mb-3 active:scale-[0.99]"
-          >
-            <View className="w-10 h-10 justify-center items-center rounded-xl bg-surfaceLight mr-3">
-              <Text className="text-base">
-                {item.category?.icon_name === "shopping-cart"
-                  ? "🛒"
-                  : item.category?.icon_name === "utensils"
-                  ? "🍕"
-                  : item.category?.icon_name === "home"
-                  ? "🏠"
-                  : "💸"}
+          {filteredExpenses?.length === 0 && (
+            <View className="py-12 items-center bg-[#151E2E] border border-white/5 rounded-2xl">
+              <Text className="text-4xl mb-3">👛</Text>
+              <Text className="text-white text-sm font-black">No expenses yet</Text>
+              <Text className="text-[#94A3B8] text-[10px] mt-1 text-center px-6">
+                Your wallet is happy today 😂
               </Text>
+              <TouchableOpacity
+                onPress={handleOpenAdd}
+                className="mt-5 bg-[#14E5D4]/10 border border-[#14E5D4]/20 px-4 py-2.5 rounded-xl active:opacity-85"
+              >
+                <Text className="text-[#14E5D4] text-xs font-bold">Add First Expense</Text>
+              </TouchableOpacity>
             </View>
-            <View className="flex-1 mr-2">
-              <Text className="text-white text-sm font-bold" numberOfLines={1}>
-                {item.description}
-              </Text>
-              <Text className="text-accentGray text-[10px] mt-0.5" numberOfLines={1}>
-                {item.category?.name || "Other"}
-              </Text>
+          )}
+        </View>
+      </ScrollView>
+
+      {/* FLOATING ACTION ADD BUTTON */}
+      <TouchableOpacity
+        onPress={handleOpenAdd}
+        className="absolute bottom-6 right-6 bg-[#14E5D4] px-5 py-4 rounded-full flex-row items-center shadow-lg active:scale-95"
+      >
+        <Plus size={18} color="#0B1220" strokeWidth={3} />
+        <Text className="text-[#0B1220] font-black text-sm ml-2">Add Expense</Text>
+      </TouchableOpacity>
+
+      {/* LONG PRESS ACTION MENU BOTTOM SHEET */}
+      <Modal visible={isActionMenuOpen} animationType="slide" transparent>
+        <View className="flex-1 justify-end bg-black/60">
+          {longPressedExpense && (
+            <View className="bg-[#151E2E] border-t-[0.5px] border-white/10 rounded-t-3xl p-6 pb-10">
+              <View className="flex-row justify-between items-center mb-6">
+                <Text className="text-lg font-bold text-white">Expense Options</Text>
+                <TouchableOpacity
+                  onPress={() => setIsActionMenuOpen(false)}
+                  className="w-8 h-8 justify-center items-center rounded-full bg-white/5"
+                >
+                  <X size={16} color="#94A3B8" />
+                </TouchableOpacity>
+              </View>
+
+              <View className="space-y-3">
+                <TouchableOpacity
+                  onPress={() => {
+                    setIsActionMenuOpen(false);
+                    handleOpenEdit(longPressedExpense);
+                  }}
+                  className="flex-row items-center p-4 rounded-xl bg-white/5 border border-white/10 active:opacity-80"
+                >
+                  <Edit size={16} color="#14E5D4" />
+                  <Text className="text-white font-bold text-sm ml-3">Edit Details</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={() => handleDuplicate(longPressedExpense)}
+                  className="flex-row items-center p-4 rounded-xl bg-white/5 border border-white/10 active:opacity-80"
+                >
+                  <Copy size={16} color="#22C55E" />
+                  <Text className="text-white font-bold text-sm ml-3">Duplicate Entry</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={() => {
+                    Theme.haptics.medium();
+                    deleteMutation.mutate(longPressedExpense.id);
+                  }}
+                  className="flex-row items-center p-4 rounded-xl bg-[#EF4444]/10 border border-[#EF4444]/20 active:opacity-80"
+                >
+                  <Trash2 size={16} color="#EF4444" />
+                  <Text className="text-[#EF4444] font-bold text-sm ml-3">Delete Expense</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-            <View className="items-end">
-              <Text className="text-white font-bold text-sm">₹ {item.amount}</Text>
-              <Text className="text-accentGray text-[9px] mt-0.5">
-                {new Date(item.expense_date).toLocaleDateString()}
-              </Text>
-            </View>
-          </TouchableOpacity>
-        )}
-        ListEmptyComponent={
-          <View className="py-10 items-center">
-            <Text className="text-accentGray text-sm">No personal expenses found.</Text>
-          </View>
-        }
-      />
+          )}
+        </View>
+      </Modal>
 
       {/* ADD/EDIT MODAL SHEET */}
       <Modal visible={isOpen} animationType="slide" transparent>
         <View className="flex-1 justify-end bg-black/60">
-          <View className="bg-surface border-t-[0.5px] border-border rounded-t-3xl p-6 pb-10">
+          <View className="bg-[#151E2E] border-t-[0.5px] border-white/10 rounded-t-3xl p-6 pb-10">
             <View className="flex-row justify-between items-center mb-6">
               <Text className="text-xl font-bold text-white">
                 {editingExpense ? "Edit Expense" : "Add Personal Expense"}
               </Text>
               <TouchableOpacity
                 onPress={() => setIsOpen(false)}
-                className="w-8 h-8 justify-center items-center rounded-full bg-surfaceLight"
+                className="w-8 h-8 justify-center items-center rounded-full bg-white/5"
               >
-                <X size={16} color="#A3A3A3" />
+                <X size={16} color="#94A3B8" />
               </TouchableOpacity>
             </View>
 
             <View className="space-y-4">
               {/* Amount input */}
               <View>
-                <Text className="text-accentGray text-xs font-bold uppercase tracking-widest mb-2">
+                <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-2">
                   Amount
                 </Text>
-                <View className="flex-row items-center bg-surfaceLight border-[0.5px] border-border rounded-xl px-4 py-3">
-                  <Text className="text-accentCyan font-bold text-lg mr-2">₹</Text>
+                <View className="flex-row items-center bg-white/5 border-[0.5px] border-white/10 rounded-xl px-4 py-3">
+                  <Text className="text-[#14E5D4] font-black text-lg mr-2">₹</Text>
                   <Controller
                     control={control}
                     name="amount"
@@ -408,13 +831,13 @@ export default function PersonalExpenses() {
                   />
                 </View>
                 {errors.amount && (
-                  <Text className="text-accentPink text-xs mt-1">{errors.amount.message}</Text>
+                  <Text className="text-[#EF4444] text-xs mt-1">{errors.amount.message}</Text>
                 )}
               </View>
 
               {/* Description input */}
               <View>
-                <Text className="text-accentGray text-xs font-bold uppercase tracking-widest mb-2">
+                <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-2">
                   Description
                 </Text>
                 <Controller
@@ -422,7 +845,7 @@ export default function PersonalExpenses() {
                   name="description"
                   render={({ field: { onChange, onBlur, value } }) => (
                     <TextInput
-                      className="bg-surfaceLight border-[0.5px] border-border text-white px-4 py-3 rounded-xl"
+                      className="bg-white/5 border-[0.5px] border-white/10 text-white px-4 py-3 rounded-xl"
                       placeholder="e.g. Milk & Bread"
                       placeholderTextColor="#666666"
                       onBlur={onBlur}
@@ -432,7 +855,7 @@ export default function PersonalExpenses() {
                   )}
                 />
                 {errors.description && (
-                  <Text className="text-accentPink text-xs mt-1">
+                  <Text className="text-[#EF4444] text-xs mt-1">
                     {errors.description.message}
                   </Text>
                 )}
@@ -440,7 +863,7 @@ export default function PersonalExpenses() {
 
               {/* Category selector */}
               <View>
-                <Text className="text-accentGray text-xs font-bold uppercase tracking-widest mb-2">
+                <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-2">
                   Category
                 </Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} className="flex-row py-1">
@@ -460,13 +883,13 @@ export default function PersonalExpenses() {
                               }}
                               className={`px-4 py-2.5 rounded-xl mr-2 border-[0.5px] ${
                                 isSelected
-                                  ? "bg-accentCyan/10 border-accentCyan"
-                                  : "bg-surface border-border"
+                                  ? "bg-[#14E5D4]/10 border-[#14E5D4]"
+                                  : "bg-white/5 border-white/10"
                               }`}
                             >
                               <Text
                                 className={`text-xs font-bold ${
-                                  isSelected ? "text-accentCyan" : "text-accentGray"
+                                  isSelected ? "text-[#14E5D4]" : "text-[#94A3B8]"
                                 }`}
                               >
                                 {cat.name}
@@ -479,7 +902,7 @@ export default function PersonalExpenses() {
                   })}
                 </ScrollView>
                 {errors.categoryId && (
-                  <Text className="text-accentPink text-xs mt-1">{errors.categoryId.message}</Text>
+                  <Text className="text-[#EF4444] text-xs mt-1">{errors.categoryId.message}</Text>
                 )}
               </View>
 
@@ -488,14 +911,14 @@ export default function PersonalExpenses() {
                 <TouchableOpacity
                   onPress={handleSubmit((data) => saveMutation.mutate(data))}
                   disabled={saveMutation.isPending}
-                  className="flex-row bg-accentCyan py-4 rounded-xl justify-center items-center active:opacity-90 shadow-lg"
+                  className="flex-row bg-[#14E5D4] py-4 rounded-xl justify-center items-center active:opacity-90 shadow-lg"
                 >
                   {saveMutation.isPending ? (
-                    <ActivityIndicator size="small" color="#0D0D0D" />
+                    <ActivityIndicator size="small" color="#0B1220" />
                   ) : (
                     <>
-                      <Save size={18} color="#0D0D0D" />
-                      <Text className="text-background font-black text-base ml-2">
+                      <Save size={18} color="#0B1220" />
+                      <Text className="text-[#0B1220] font-black text-base ml-2">
                         {editingExpense ? "Save Changes" : "Save Expense"}
                       </Text>
                     </>
@@ -509,14 +932,14 @@ export default function PersonalExpenses() {
                       deleteMutation.mutate(editingExpense.id);
                     }}
                     disabled={deleteMutation.isPending}
-                    className="flex-row border-[0.5px] border-accentPink py-4 rounded-xl justify-center items-center active:opacity-85"
+                    className="flex-row border-[0.5px] border-[#EF4444] py-4 rounded-xl justify-center items-center active:opacity-85"
                   >
                     {deleteMutation.isPending ? (
-                      <ActivityIndicator size="small" color="#FF007F" />
+                      <ActivityIndicator size="small" color="#EF4444" />
                     ) : (
                       <>
-                        <Trash2 size={18} color="#FF007F" />
-                        <Text className="text-accentPink font-bold text-base ml-2">
+                        <Trash2 size={18} color="#EF4444" />
+                        <Text className="text-[#EF4444] font-bold text-base ml-2">
                           Delete Expense
                         </Text>
                       </>

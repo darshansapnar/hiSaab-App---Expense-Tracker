@@ -7,14 +7,36 @@ import {
   TextInput,
   ActivityIndicator,
   Modal,
+  RefreshControl,
+  KeyboardAvoidingView,
+  Platform,
+  Share,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "../../../store/authStore";
 import { supabase } from "../../../services/supabase";
 import { useToastStore } from "../../../store/toastStore";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Theme } from "../../../constants/Theme";
-import { Users, Plus, Hash, X, ArrowRight, Home, Landmark, Users2, Compass } from "lucide-react-native";
+import { Colors } from "../../../constants/Colors";
+import * as Clipboard from "expo-clipboard";
+import {
+  Users,
+  Plus,
+  Hash,
+  X,
+  ChevronRight,
+  Home,
+  Landmark,
+  Users2,
+  Compass,
+  Search,
+  ArrowUpRight,
+  ArrowDownLeft,
+  Trash2,
+  Share2,
+} from "lucide-react-native";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -33,10 +55,11 @@ type CreateGroupSchema = z.infer<typeof createGroupSchema>;
 
 const GROUP_TYPES = [
   { value: "hostel", label: "Hostel", icon: Home },
-  { value: "flatmates", label: "Flatmates", icon: Users2 },
+  { value: "flatmates", label: "Flat", icon: Users2 },
   { value: "trip", label: "Trip", icon: Compass },
-  { value: "couple", label: "Couple", icon: Users },
+  { value: "couple", label: "Friends", icon: Users },
   { value: "family", label: "Family", icon: Landmark },
+  { value: "other", label: "Custom", icon: Plus },
 ];
 
 export default function Groups() {
@@ -49,6 +72,11 @@ export default function Groups() {
   const [isJoinOpen, setIsJoinOpen] = useState(false);
   const [joinCode, setJoinCode] = useState("");
   const [isJoining, setIsJoining] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Ellipsis menu states
+  const [selectedGroupForMenu, setSelectedGroupForMenu] = useState<any | null>(null);
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
 
   // Fetch groups where active user is a registered member
   const {
@@ -58,13 +86,40 @@ export default function Groups() {
   } = useQuery({
     queryKey: ["groups", user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data: memberRows, error: memberErr } = await supabase
         .from("group_members")
-        .select("group:groups(*)")
+        .select("group_id")
         .eq("profile_id", user?.id);
 
+      if (memberErr) throw memberErr;
+      const groupIds = (memberRows || []).map((mr) => mr.group_id);
+      if (groupIds.length === 0) return [];
+
+      const { data: groupsData, error: groupsErr } = await supabase
+        .from("groups")
+        .select(`
+          *,
+          group_members(profile_id, role),
+          expenses(description, amount, expense_date, is_settlement, payer:profiles(username, display_name))
+        `)
+        .in("id", groupIds);
+
+      if (groupsErr) throw groupsErr;
+      return groupsData || [];
+    },
+    enabled: !!user?.id,
+  });
+
+  // Fetch peer balances to calculate global balances
+  const { data: allPeerBalances, isLoading: isBalancesLoading } = useQuery({
+    queryKey: ["global-peer-balances", user?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("peer_balances")
+        .select("*")
+        .or(`user_a_id.eq.${user?.id},user_b_id.eq.${user?.id}`);
       if (error) throw error;
-      return (data || []).map((d: any) => d.group).filter(Boolean);
+      return (data || []) as any;
     },
     enabled: !!user?.id,
   });
@@ -91,19 +146,21 @@ export default function Groups() {
   // Mutation to create a group
   const createMutation = useMutation({
     mutationFn: async (data: CreateGroupSchema) => {
-      const { data: newGroup, error } = await supabase
-        .from("groups")
-        .insert({
-          name: data.name.trim(),
-          description: data.description?.trim() || null,
-          type: data.type,
-          currency: data.currency,
-          created_by: user?.id,
-        })
-        .select()
-        .single();
+      const { data: newGroup, error } = await supabase.rpc("create_group_with_admin", {
+        p_name: data.name.trim(),
+        p_description: data.description?.trim() || null,
+        p_type: data.type,
+        p_currency: data.currency,
+        p_created_by: user?.id,
+      });
 
-      if (error) throw error;
+      if (error) {
+        if (error.message.includes("unique_violation") || error.message.includes("already part")) {
+          throw new Error("This member is already part of the group.");
+        }
+        throw new Error("Couldn't create the group. Please try again.");
+      }
+
       return newGroup;
     },
     onSuccess: () => {
@@ -116,6 +173,25 @@ export default function Groups() {
     onError: (error: any) => {
       Theme.haptics.error();
       showToast(error.message || "Failed to create group", "error");
+    },
+  });
+
+  // Mutation to delete a group
+  const deleteGroupMutation = useMutation({
+    mutationFn: async (groupId: string) => {
+      const { error } = await supabase.from("groups").delete().eq("id", groupId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      Theme.haptics.success();
+      queryClient.invalidateQueries({ queryKey: ["groups", user?.id] });
+      showToast("Group deleted successfully", "success");
+      setIsDeleteConfirmOpen(false);
+      setSelectedGroupForMenu(null);
+    },
+    onError: (error: any) => {
+      Theme.haptics.error();
+      showToast(error.message || "Failed to delete group", "error");
     },
   });
 
@@ -149,7 +225,6 @@ export default function Groups() {
       });
 
       if (joinError) {
-        // Handle duplicate key error
         if (joinError.code === "23505") {
           showToast("You are already a member of this group", "info");
         } else {
@@ -171,12 +246,75 @@ export default function Groups() {
     }
   };
 
+  const getGroupBalance = (groupId: string) => {
+    if (!allPeerBalances) return 0;
+    let net = 0;
+    allPeerBalances.forEach((pb: any) => {
+      if (pb.group_id === groupId) {
+        const bal = Number(pb.net_balance) || 0;
+        if (pb.user_a_id === user?.id) {
+          net += bal;
+        } else if (pb.user_b_id === user?.id) {
+          net -= bal;
+        }
+      }
+    });
+    return net;
+  };
+
+  const getGroupLastActivity = (item: any) => {
+    if (!item.expenses || item.expenses.length === 0) {
+      return "No activity yet";
+    }
+    const sorted = [...item.expenses].sort(
+      (a, b) => new Date(b.expense_date).getTime() - new Date(a.expense_date).getTime()
+    );
+    const latest = sorted[0];
+    if (latest.is_settlement) {
+      return `Settled ₹${Number(latest.amount).toFixed(0)}`;
+    }
+    const payerName = latest.payer?.username ? `@${latest.payer.username}` : latest.payer?.display_name || "Someone";
+    return `${payerName} added "${latest.description}"`;
+  };
+
+  const getGroupAvatarStyles = (name: string) => {
+    const firstLetter = (name || "G").charAt(0).toUpperCase();
+    const colors = [
+      { bgClass: "bg-red-500/10 border-red-500/20", textClass: "text-red-400" },
+      { bgClass: "bg-emerald-500/10 border-emerald-500/20", textClass: "text-emerald-400" },
+      { bgClass: "bg-blue-500/10 border-blue-500/20", textClass: "text-blue-400" },
+      { bgClass: "bg-purple-500/10 border-purple-500/20", textClass: "text-purple-400" },
+      { bgClass: "bg-yellow-500/10 border-yellow-500/20", textClass: "text-yellow-400" },
+      { bgClass: "bg-pink-500/10 border-pink-500/20", textClass: "text-pink-400" },
+      { bgClass: "bg-cyan-500/10 border-cyan-500/20", textClass: "text-cyan-400" },
+      { bgClass: "bg-orange-500/10 border-orange-500/20", textClass: "text-orange-400" },
+    ];
+    const index = (name || "").charCodeAt(0) % colors.length;
+    return { ...colors[index], letter: firstLetter };
+  };
+
+  // Filter groups search
+  const filteredGroups = (groups || []).filter((g: any) => {
+    const query = searchQuery.toLowerCase().trim();
+    if (!query) return true;
+    return (
+      g.name.toLowerCase().includes(query) ||
+      (g.description || "").toLowerCase().includes(query) ||
+      g.type.toLowerCase().includes(query)
+    );
+  });
+
   const renderGroupItem = ({ item }: { item: any }) => {
-    let TypeIcon = Users;
-    if (item.type === "hostel") TypeIcon = Home;
-    else if (item.type === "flatmates") TypeIcon = Users2;
-    else if (item.type === "trip") TypeIcon = Compass;
-    else if (item.type === "family") TypeIcon = Landmark;
+    let typeConfig = GROUP_TYPES.find((gt) => gt.value === item.type) || GROUP_TYPES[5];
+    const groupBalance = getGroupBalance(item.id);
+    const avatar = getGroupAvatarStyles(item.name);
+    const lastActivity = getGroupLastActivity(item);
+    const totalGroupSpending =
+      item.expenses?.reduce(
+        (sum: number, exp: any) => sum + (exp.is_settlement ? 0 : Number(exp.amount)),
+        0
+      ) || 0;
+    const count = item.group_members?.length || 1;
 
     return (
       <TouchableOpacity
@@ -184,92 +322,370 @@ export default function Groups() {
           Theme.haptics.light();
           router.push(`/groups/${item.id}`);
         }}
-        className="flex-row items-center bg-surface border-[0.5px] border-border p-4 rounded-xl mb-3 active:scale-[0.99]"
+        accessibilityRole="button"
+        accessibilityLabel={`Group: ${item.name}`}
+        className="bg-[#151E2E] border-[0.5px] border-white/5 p-5 rounded-2xl mb-4 active:scale-[0.98] transition-all duration-200 shadow-lg flex-col justify-between"
       >
-        <View className="w-12 h-12 justify-center items-center rounded-xl bg-surfaceLight mr-4">
-          <TypeIcon size={24} color="#00F5D4" />
+        {/* Top Row: Avatar, Name, Type badge, Ellipsis menu */}
+        <View className="flex-row justify-between items-center mb-3">
+          <View className="flex-row items-center flex-1 mr-2">
+            <View className={`w-12 h-12 justify-center items-center rounded-full border-[0.5px] ${avatar.bgClass}`}>
+              <Text className={`text-lg font-black ${avatar.textClass}`}>{avatar.letter}</Text>
+            </View>
+            <View className="ml-3 flex-1">
+              <View className="flex-row items-center flex-wrap">
+                <Text className="text-white text-base font-bold mr-2" numberOfLines={1}>
+                  {item.name}
+                </Text>
+                <View className="bg-white/5 border border-white/10 px-2 py-0.5 rounded-full mt-0.5">
+                  <Text className="text-[#94A3B8] text-[8px] font-bold uppercase tracking-wider">
+                    {typeConfig.label}
+                  </Text>
+                </View>
+              </View>
+              <Text className="text-[#94A3B8] text-xs mt-0.5 font-medium" numberOfLines={1}>
+                {item.description || "No description"}
+              </Text>
+            </View>
+          </View>
+
+          {/* Action Menu Ellipsis Button */}
+          <TouchableOpacity
+            onPress={() => {
+              Theme.haptics.light();
+              setSelectedGroupForMenu(item);
+            }}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            className="p-2"
+          >
+            <Text className="text-[#94A3B8] text-base font-bold tracking-widest">•••</Text>
+          </TouchableOpacity>
         </View>
-        <View className="flex-1">
-          <Text className="text-white text-base font-bold">{item.name}</Text>
-          <Text className="text-accentGray text-xs mt-1" numberOfLines={1}>
-            {item.description || `Type: ${item.type}`}
+
+        {/* Second Row: Members Count, Total Spent, Last Activity */}
+        <View className="flex-row justify-between items-center py-2.5 border-y border-white/5 mb-3 gap-2">
+          <View className="flex-row items-center">
+            <Users size={11} color="#94A3B8" />
+            <Text className="text-[#94A3B8] text-[10px] ml-1.5 font-bold">
+              {count} {count === 1 ? "member" : "members"}
+            </Text>
+          </View>
+
+          <View className="flex-row items-center">
+            <Text className="text-[#94A3B8] text-[10px] font-semibold">Spent: </Text>
+            <Text className="text-[#14E5D4] text-[10px] font-extrabold">
+              ₹{totalGroupSpending.toFixed(0)}
+            </Text>
+          </View>
+
+          <Text className="text-[#94A3B8] text-[9px] font-medium max-w-[45%]" numberOfLines={1}>
+            {lastActivity}
           </Text>
         </View>
-        <ArrowRight size={16} color="#A3A3A3" />
+
+        {/* Third Row: Balance status & chevron */}
+        <View className="flex-row justify-between items-center">
+          <View>
+            {groupBalance > 0.01 ? (
+              <View className="flex-row items-center">
+                <ArrowDownLeft size={14} color="#22C55E" />
+                <Text className="text-[#22C55E] text-xs font-black ml-1">
+                  You receive ₹{groupBalance.toFixed(0)}
+                </Text>
+              </View>
+            ) : groupBalance < -0.01 ? (
+              <View className="flex-row items-center">
+                <ArrowUpRight size={14} color="#EF4444" />
+                <Text className="text-[#EF4444] text-xs font-black ml-1">
+                  You owe ₹{Math.abs(groupBalance).toFixed(0)}
+                </Text>
+              </View>
+            ) : (
+              <Text className="text-[#94A3B8] text-xs font-bold">Settled up</Text>
+            )}
+          </View>
+          <ChevronRight size={16} color={Colors.accentCyan} />
+        </View>
       </TouchableOpacity>
     );
   };
 
+  // Aggregate global user balances
+  const globalOwes = (allPeerBalances || [])
+    .filter((pb: any) => {
+      const bal = Number(pb.net_balance) || 0;
+      if (pb.user_a_id === user?.id) return bal < -0.01;
+      if (pb.user_b_id === user?.id) return bal > 0.01;
+      return false;
+    })
+    .reduce((sum: number, pb: any) => {
+      const bal = Math.abs(Number(pb.net_balance)) || 0;
+      return sum + bal;
+    }, 0);
+
+  const globalReceives = (allPeerBalances || [])
+    .filter((pb: any) => {
+      const bal = Number(pb.net_balance) || 0;
+      if (pb.user_a_id === user?.id) return bal > 0.01;
+      if (pb.user_b_id === user?.id) return bal < -0.01;
+      return false;
+    })
+    .reduce((sum: number, pb: any) => {
+      const bal = Math.abs(Number(pb.net_balance)) || 0;
+      return sum + bal;
+    }, 0);
+
   return (
-    <View className="flex-1 bg-background px-6 pt-16">
-      <View className="flex-row justify-between items-center mb-8">
-        <Text className="text-3xl font-black text-white tracking-tighter">Groups</Text>
-        <View className="flex-row space-x-2">
-          {/* Join Group Trigger */}
-          <TouchableOpacity
-            onPress={() => {
-              Theme.haptics.light();
-              setIsJoinOpen(true);
-            }}
-            className="w-10 h-10 justify-center items-center rounded-full bg-surfaceLight border-[0.5px] border-border active:scale-95 mr-2"
-          >
-            <Hash size={18} color="#A3A3A3" />
-          </TouchableOpacity>
+    <SafeAreaView style={{ flex: 1, backgroundColor: "#0B1220" }}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        className="flex-1"
+      >
+        <View className="flex-1 px-6 pt-4">
+          {/* HEADER SECTION */}
+          <View className="flex-row justify-between items-center mb-6">
+            <View>
+              <Text className="text-3xl font-black text-white tracking-tighter">Groups</Text>
+              <Text className="text-[#94A3B8] text-xs font-medium mt-1">
+                Track, split and settle together
+              </Text>
+            </View>
+            <View className="flex-row space-x-2">
+              {/* Invite button */}
+              <TouchableOpacity
+                onPress={() => {
+                  Theme.haptics.light();
+                  setIsJoinOpen(true);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Join Group by Invite Code"
+                className="flex-row justify-center items-center px-4 py-2.5 rounded-full bg-[#151E2E] border-[0.5px] border-white/10 active:scale-95"
+              >
+                <Hash size={14} color="#94A3B8" className="mr-1" />
+                <Text className="text-[#94A3B8] text-xs font-bold">Invite Code</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
 
-          {/* Create Group Trigger */}
-          <TouchableOpacity
-            onPress={() => {
-              Theme.haptics.light();
-              setIsCreateOpen(true);
-            }}
-            className="w-10 h-10 justify-center items-center rounded-full bg-accentCyan active:scale-95"
-          >
-            <Plus size={20} color="#0D0D0D" />
-          </TouchableOpacity>
-        </View>
-      </View>
+          {/* TWO VISUAL BALANCE CARDS */}
+          <View className="flex-row justify-between gap-3 mb-6">
+            {/* Card 1: To Pay */}
+            <View className="flex-1 bg-[#151E2E] border-[0.5px] border-white/5 p-4 rounded-2xl shadow-xl flex-row justify-between items-center">
+              <View className="flex-1 mr-2">
+                <Text className="text-[#94A3B8] text-[10px] font-bold uppercase tracking-wider">
+                  To Pay
+                </Text>
+                <Text className="text-white text-lg font-black mt-1">
+                  ₹{globalOwes.toFixed(0)}
+                </Text>
+              </View>
+              <ArrowUpRight size={20} color="#EF4444" />
+            </View>
 
-      {/* Render list of groups */}
-      {isLoading ? (
-        <View className="flex-1 justify-center items-center">
-          <ActivityIndicator size="large" color="#00F5D4" />
+            {/* Card 2: To Receive */}
+            <View className="flex-1 bg-[#151E2E] border-[0.5px] border-white/5 p-4 rounded-2xl shadow-xl flex-row justify-between items-center">
+              <View className="flex-1 mr-2">
+                <Text className="text-[#94A3B8] text-[10px] font-bold uppercase tracking-wider">
+                  To Receive
+                </Text>
+                <Text className="text-white text-lg font-black mt-1">
+                  ₹{globalReceives.toFixed(0)}
+                </Text>
+              </View>
+              <ArrowDownLeft size={20} color="#22C55E" />
+            </View>
+          </View>
+
+          {/* SEARCH BAR */}
+          <View className="flex-row items-center bg-[#151E2E] border-[0.5px] border-white/5 px-4 py-3.5 rounded-xl mb-6 shadow-md">
+            <Search size={16} color="#94A3B8" className="mr-3.5" />
+            <TextInput
+              className="flex-1 text-white text-sm py-0.5"
+              placeholder="Search groups..."
+              placeholderTextColor="#94A3B8"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity
+                onPress={() => setSearchQuery("")}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <X size={16} color="#94A3B8" />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* GROUPS LIST */}
+          {isLoading || isBalancesLoading ? (
+            <View className="flex-1 justify-center items-center">
+              <ActivityIndicator size="large" color={Colors.accentCyan} />
+            </View>
+          ) : filteredGroups.length > 0 ? (
+            <FlatList
+              data={filteredGroups}
+              renderItem={renderGroupItem}
+              keyExtractor={(item) => item.id}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingBottom: 100 }}
+              refreshControl={
+                <RefreshControl
+                  refreshing={isLoading || isBalancesLoading}
+                  onRefresh={() => {
+                    Theme.haptics.light();
+                    refetch();
+                  }}
+                  tintColor={Colors.accentCyan}
+                />
+              }
+            />
+          ) : (
+            <View className="flex-1 justify-center items-center px-4">
+              <Text className="text-white text-lg font-bold text-center mb-2">No groups yet</Text>
+              <Text className="text-accentGray text-sm text-center leading-relaxed mb-6">
+                Create a group for roommates or trips, or enter an invite code to join an existing
+                group.
+              </Text>
+            </View>
+          )}
         </View>
-      ) : groups && groups.length > 0 ? (
-        <FlatList
-          data={groups}
-          renderItem={renderGroupItem}
-          keyExtractor={(item) => item.id}
-          refreshing={isLoading}
-          onRefresh={refetch}
-          contentContainerStyle={{ paddingBottom: 20 }}
-        />
-      ) : (
-        <View className="flex-1 justify-center items-center px-4">
-          <Text className="text-white text-lg font-bold text-center mb-2">No groups yet</Text>
-          <Text className="text-accentGray text-sm text-center leading-relaxed mb-6">
-            Create a group for roommates or trips, or enter an invite code to join an existing group.
-          </Text>
+      </KeyboardAvoidingView>
+
+      {/* FLOATING ACTION BUTTON (FAB) */}
+      <TouchableOpacity
+        onPress={() => {
+          Theme.haptics.light();
+          setIsCreateOpen(true);
+        }}
+        style={{
+          position: "absolute",
+          bottom: 24,
+          right: 24,
+          shadowColor: "#14E5D4",
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.3,
+          shadowRadius: 10,
+          elevation: 8,
+        }}
+        className="flex-row bg-[#14E5D4] px-5 py-3.5 rounded-full items-center active:scale-95 z-40"
+      >
+        <Plus size={20} color="#0B1220" className="mr-1.5" />
+        <Text className="text-[#0B1220] font-black text-sm">New Group</Text>
+      </TouchableOpacity>
+
+      {/* GROUP CONTEXT MENU ACTIONS MODAL */}
+      <Modal visible={selectedGroupForMenu !== null} animationType="slide" transparent>
+        <View className="flex-1 justify-end bg-black/60">
+          <View className="bg-[#151E2E] border-t-[0.5px] border-white/10 rounded-t-3xl p-6 pb-10">
+            <View className="flex-row justify-between items-center mb-6">
+              <Text className="text-xl font-bold text-white">Group Options</Text>
+              <TouchableOpacity
+                onPress={() => setSelectedGroupForMenu(null)}
+                className="w-8 h-8 justify-center items-center rounded-full bg-white/5"
+              >
+                <X size={16} color="#94A3B8" />
+              </TouchableOpacity>
+            </View>
+
+            <View className="space-y-2">
+              <TouchableOpacity
+                onPress={async () => {
+                  Theme.haptics.light();
+                  try {
+                    const code = selectedGroupForMenu.id;
+                    const name = selectedGroupForMenu.name;
+                    await Share.share({
+                      title: `Join ${name} on hiSaab`,
+                      message: `Join my shared ledger "${name}" on hiSaab!\nInvite Code: ${code}\nLink: https://hisaab.app/join?code=${code}`,
+                    });
+                  } catch (e: any) {
+                    showToast("Failed to share", "error");
+                  }
+                  setSelectedGroupForMenu(null);
+                }}
+                className="flex-row items-center py-3.5 border-b border-white/5 px-2 active:opacity-75"
+              >
+                <Share2 size={16} color="#94A3B8" className="mr-3" />
+                <Text className="text-[#94A3B8] font-semibold text-sm">Share Invite Link</Text>
+              </TouchableOpacity>
+
+              {/* Delete Group (Owner only check) */}
+              {(() => {
+                const isUserOwner = selectedGroupForMenu?.created_by === user?.id;
+
+                if (isUserOwner) {
+                  return (
+                    <TouchableOpacity
+                      onPress={() => {
+                        Theme.haptics.medium();
+                        setIsDeleteConfirmOpen(true);
+                      }}
+                      className="flex-row items-center py-3.5 px-2 active:opacity-75"
+                    >
+                      <Trash2 size={16} color="#EF4444" className="mr-3" />
+                      <Text className="text-[#EF4444] font-semibold text-sm">Delete Group</Text>
+                    </TouchableOpacity>
+                  );
+                }
+                return null;
+              })()}
+            </View>
+          </View>
         </View>
-      )}
+      </Modal>
+
+      {/* DELETE GROUP CONFIRMATION DIALOG MODAL */}
+      <Modal visible={isDeleteConfirmOpen} animationType="fade" transparent>
+        <View className="flex-1 justify-center items-center bg-black/75 px-6">
+          <View className="bg-[#151E2E] border-[0.5px] border-white/5 w-full p-6 rounded-2xl shadow-xl items-center">
+            <Text className="text-xl font-bold text-white mb-2">Delete Group?</Text>
+            <Text className="text-accentGray text-xs text-center leading-relaxed mb-6">
+              This action is permanent. Deleting this group will permanently delete all expenses,
+              splits, peer balances, and activity history inside.
+            </Text>
+            <View className="flex-row space-x-3 w-full">
+              <TouchableOpacity
+                onPress={() => setIsDeleteConfirmOpen(false)}
+                className="flex-1 bg-white/5 py-3 rounded-xl items-center border-[0.5px] border-white/10 active:opacity-75 mr-2"
+              >
+                <Text className="text-accentGray font-bold">Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => deleteGroupMutation.mutate(selectedGroupForMenu.id)}
+                disabled={deleteGroupMutation.isPending}
+                className="flex-1 bg-[#EF4444] py-3 rounded-xl items-center active:opacity-90"
+              >
+                {deleteGroupMutation.isPending ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text className="text-white font-bold">Delete</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* CREATE GROUP MODAL SHEET */}
       <Modal visible={isCreateOpen} animationType="slide" transparent>
         <View className="flex-1 justify-end bg-black/60">
-          <View className="bg-surface border-t-[0.5px] border-border rounded-t-3xl p-6 pb-10">
+          <View className="bg-[#151E2E] border-t-[0.5px] border-white/10 rounded-t-3xl p-6 pb-10">
             <View className="flex-row justify-between items-center mb-6">
               <Text className="text-xl font-bold text-white">Create Group</Text>
               <TouchableOpacity
                 onPress={() => setIsCreateOpen(false)}
-                className="w-8 h-8 justify-center items-center rounded-full bg-surfaceLight"
+                className="w-8 h-8 justify-center items-center rounded-full bg-white/5"
               >
-                <X size={16} color="#A3A3A3" />
+                <X size={16} color="#94A3B8" />
               </TouchableOpacity>
             </View>
 
             <View className="space-y-4">
               {/* Group Name input */}
               <View>
-                <Text className="text-accentGray text-xs font-bold uppercase tracking-widest mb-2">
+                <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-2">
                   Group Name
                 </Text>
                 <Controller
@@ -277,7 +693,7 @@ export default function Groups() {
                   name="name"
                   render={({ field: { onChange, onBlur, value } }) => (
                     <TextInput
-                      className="bg-surfaceLight border-[0.5px] border-border text-white px-4 py-3 rounded-xl"
+                      className="bg-white/5 border-[0.5px] border-white/10 text-white px-4 py-3 rounded-xl"
                       placeholder="e.g. Hostel Flat 302"
                       placeholderTextColor="#666666"
                       onBlur={onBlur}
@@ -293,7 +709,7 @@ export default function Groups() {
 
               {/* Group Description */}
               <View>
-                <Text className="text-accentGray text-xs font-bold uppercase tracking-widest mb-2">
+                <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-2">
                   Description
                 </Text>
                 <Controller
@@ -301,7 +717,7 @@ export default function Groups() {
                   name="description"
                   render={({ field: { onChange, onBlur, value } }) => (
                     <TextInput
-                      className="bg-surfaceLight border-[0.5px] border-border text-white px-4 py-3 rounded-xl"
+                      className="bg-white/5 border-[0.5px] border-white/10 text-white px-4 py-3 rounded-xl"
                       placeholder="Room rent, water jar, cleaning etc."
                       placeholderTextColor="#666666"
                       onBlur={onBlur}
@@ -317,7 +733,7 @@ export default function Groups() {
 
               {/* Group Type Selector horizontal row */}
               <View>
-                <Text className="text-accentGray text-xs font-bold uppercase tracking-widest mb-2">
+                <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-2">
                   Group Type
                 </Text>
                 <View className="flex-row flex-wrap gap-2">
@@ -334,13 +750,13 @@ export default function Groups() {
                         className={`flex-row items-center border-[0.5px] px-3 py-2 rounded-lg ${
                           isActive
                             ? "bg-accentCyan/10 border-accentCyan"
-                            : "bg-surfaceLight border-border"
+                            : "bg-white/5 border-white/10"
                         }`}
                       >
-                        <TypeIcon size={14} color={isActive ? "#00F5D4" : "#A3A3A3"} />
+                        <TypeIcon size={14} color={isActive ? "#14E5D4" : "#94A3B8"} />
                         <Text
                           className={`text-xs ml-1 font-bold ${
-                            isActive ? "text-accentCyan" : "text-accentGray"
+                            isActive ? "text-accentCyan" : "text-[#94A3B8]"
                           }`}
                         >
                           {type.label}
@@ -371,18 +787,18 @@ export default function Groups() {
       {/* JOIN GROUP DIALOG MODAL */}
       <Modal visible={isJoinOpen} animationType="fade" transparent>
         <View className="flex-1 justify-center items-center bg-black/70 px-6">
-          <View className="bg-surface border-[0.5px] border-border w-full p-6 rounded-2xl shadow-xl">
+          <View className="bg-[#151E2E] border-[0.5px] border-white/5 w-full p-6 rounded-2xl shadow-xl">
             <View className="flex-row justify-between items-center mb-4">
               <Text className="text-lg font-bold text-white">Join Group</Text>
               <TouchableOpacity onPress={() => setIsJoinOpen(false)} className="p-1">
-                <X size={16} color="#A3A3A3" />
+                <X size={16} color="#94A3B8" />
               </TouchableOpacity>
             </View>
             <Text className="text-accentGray text-xs leading-relaxed mb-4">
               Paste the invite code (group ID) shared by your friend to join their shared ledger.
             </Text>
             <TextInput
-              className="bg-surfaceLight border-[0.5px] border-border text-white px-4 py-3 rounded-xl mb-4 text-sm font-semibold"
+              className="bg-white/5 border-[0.5px] border-white/10 text-white px-4 py-3 rounded-xl mb-4 text-sm font-semibold"
               placeholder="Paste invite code..."
               placeholderTextColor="#666666"
               onChangeText={setJoinCode}
@@ -402,6 +818,6 @@ export default function Groups() {
           </View>
         </View>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 }

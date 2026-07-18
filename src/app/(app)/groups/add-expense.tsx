@@ -14,11 +14,13 @@ import { useAuthStore } from "../../../store/authStore";
 import { supabase } from "../../../services/supabase";
 import { useToastStore } from "../../../store/toastStore";
 import { Theme } from "../../../constants/Theme";
+import { Colors } from "../../../constants/Colors";
 import { distributeShares, safeAdd, roundToTwoDecimals } from "../../../utils/math";
-import { ChevronLeft, Info, Percent, DollarSign, Scale, Users, Save } from "lucide-react-native";
+import { ChevronLeft, Info, Percent, DollarSign, Scale, Users, Save, Calendar, FileText, Image } from "lucide-react-native";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 const expenseFormSchema = z.object({
   amount: z.string().refine((val) => !isNaN(Number(val)) && Number(val) > 0, {
@@ -26,10 +28,16 @@ const expenseFormSchema = z.object({
   }),
   description: z
     .string()
-    .min(3, "Description must be at least 3 characters")
-    .max(100, "Description must be under 100 characters"),
+    .max(100, "Description must be under 100 characters")
+    .optional()
+    .or(z.literal("")),
   categoryId: z.string().uuid("Please select a category"),
-  paidBy: z.string().uuid("Please select who paid"),
+  paidBy: z.string().uuid("Please select who paid").optional().or(z.literal("")),
+  notes: z.string().max(300, "Notes must be under 300 characters").optional(),
+  expenseDate: z.string().refine((val) => !isNaN(Date.parse(val)), {
+    message: "Please enter a valid date (YYYY-MM-DD)",
+  }),
+  receiptUrl: z.string().url("Please enter a valid URL").or(z.literal("")).optional(),
 });
 
 type ExpenseFormSchema = z.infer<typeof expenseFormSchema>;
@@ -46,6 +54,10 @@ export default function AddExpense() {
   const isEditMode = !!expenseId;
   const [splitMode, setSplitMode] = useState<SplitMode>("equal");
   const [isSaving, setIsSaving] = useState(false);
+
+  // Multiple Payers state
+  const [isMultiplePayers, setIsMultiplePayers] = useState(false);
+  const [payerPayments, setPayerPayments] = useState<Record<string, string>>({});
 
   // Split value states mapped to member ID
   const [exactAmounts, setExactAmounts] = useState<Record<string, string>>({});
@@ -104,11 +116,25 @@ export default function AddExpense() {
       description: "",
       categoryId: "",
       paidBy: user?.id || "",
+      notes: "",
+      expenseDate: new Date().toISOString().split("T")[0],
+      receiptUrl: "",
     },
   });
 
   const amountStr = watch("amount");
   const totalAmount = Number(amountStr) || 0;
+
+  // Initialize multiple payments dictionary when members load
+  useEffect(() => {
+    if (members && members.length > 0) {
+      const initPayments: Record<string, string> = {};
+      members.forEach((m: any) => {
+        initPayments[m.profile.id] = "";
+      });
+      setPayerPayments(initPayments);
+    }
+  }, [members]);
 
   // Initialize form default values on edit mode load
   useEffect(() => {
@@ -117,6 +143,9 @@ export default function AddExpense() {
       setValue("description", currentExpense.description);
       setValue("categoryId", currentExpense.category_id);
       setValue("paidBy", currentExpense.paid_by);
+      setValue("notes", currentExpense.notes || "");
+      setValue("expenseDate", new Date(currentExpense.expense_date).toISOString().split("T")[0]);
+      setValue("receiptUrl", currentExpense.receipt_url || "");
 
       // Prepopulate splits inputs
       const exAm: Record<string, string> = {};
@@ -157,73 +186,142 @@ export default function AddExpense() {
         return;
       }
 
-      if (isEditMode) {
-        // --- TRANSACTIONS UPDATE FLOW ---
-        // 1. Update expense metadata
-        const { error: expenseError } = await supabase
-          .from("expenses")
-          .update({
-            amount: expenseAmount,
-            description: data.description.trim(),
-            category_id: data.categoryId,
-            paid_by: data.paidBy,
-          })
-          .eq("id", expenseId);
+      const expenseDateObj = new Date(data.expenseDate);
+      const isoDate = expenseDateObj.toISOString();
 
-        if (expenseError) throw expenseError;
+      const categoryName = categories?.find((c: any) => c.id === data.categoryId)?.name || "Expense";
+      const descVal = data.description?.trim() || categoryName;
 
-        // 2. Clear old split entries
-        const { error: deleteSplitsError } = await supabase
-          .from("expense_splits")
-          .delete()
-          .eq("expense_id", expenseId);
+      if (isMultiplePayers) {
+        // --- MULTIPLE PAYERS CREATION FLOW ---
+        const activePayments = Object.entries(payerPayments)
+          .map(([id, val]) => ({
+            id,
+            amount: Number(val) || 0,
+          }))
+          .filter((p) => p.amount > 0);
 
-        if (deleteSplitsError) throw deleteSplitsError;
+        const totalPaymentsSum = activePayments.reduce((sum, p) => sum + p.amount, 0);
+        if (Math.round(totalPaymentsSum * 100) !== Math.round(expenseAmount * 100)) {
+          showToast(`Sum of payments (₹${totalPaymentsSum.toFixed(2)}) must equal total amount (₹${expenseAmount.toFixed(2)})`, "error");
+          setIsSaving(false);
+          return;
+        }
 
-        // 3. Batch insert new splits (Supabase REST batch runs inside a single PG transaction)
-        const splitsPayload = computedSplits.map((split: any) => ({
-          expense_id: expenseId,
-          debtor_id: split.debtorId,
-          amount: split.amount,
-          share_ratio: split.shareRatio,
-        }));
+        const targetDebtors = computedSplits.map((s: any) => s.debtorId);
+        const targetWeights = computedSplits.map((s: any) => s.amount);
 
-        const { error: insertSplitsError } = await supabase
-          .from("expense_splits")
-          .insert(splitsPayload);
+        // Loop through each payer and insert a sub-expense
+        for (let i = 0; i < activePayments.length; i++) {
+          const activePayer = activePayments[i];
+          const payerProfile = members?.find((m: any) => m.profile.id === activePayer.id)?.profile;
+          const payerName = payerProfile?.username ? `@${payerProfile.username}` : payerProfile?.display_name || "Someone";
 
-        if (insertSplitsError) throw insertSplitsError;
+          const subExpenseAmount = activePayer.amount;
+          const subDescription = `${descVal} (${payerName}'s part)`;
 
-        showToast("Expense updated successfully", "success");
+          const { data: newSubExpense, error: expenseError } = await supabase
+            .from("expenses")
+            .insert({
+              group_id: groupId,
+              amount: subExpenseAmount,
+              description: subDescription,
+              category_id: data.categoryId,
+              paid_by: activePayer.id,
+              notes: data.notes?.trim() || null,
+              expense_date: isoDate,
+              receipt_url: data.receiptUrl?.trim() || null,
+            })
+            .select()
+            .single();
+
+          if (expenseError) throw expenseError;
+
+          const subSplitAmounts = distributeShares(subExpenseAmount, targetWeights);
+
+          const splitsPayload = targetDebtors.map((debtorId: string, index: number) => ({
+            expense_id: newSubExpense.id,
+            debtor_id: debtorId,
+            amount: subSplitAmounts[index],
+            share_ratio: computedSplits[index].shareRatio,
+          }));
+
+          const { error: splitsError } = await supabase.from("expense_splits").insert(splitsPayload);
+          if (splitsError) throw splitsError;
+        }
+
+        showToast("Expense shared among multiple payers logged!", "success");
       } else {
-        // --- CREATION FLOW ---
-        // 1. Insert expense row
-        const { data: newExpense, error: expenseError } = await supabase
-          .from("expenses")
-          .insert({
-            group_id: groupId,
-            amount: expenseAmount,
-            description: data.description.trim(),
-            category_id: data.categoryId,
-            paid_by: data.paidBy,
-          })
-          .select()
-          .single();
+        // --- SINGLE PAYER CREATION/EDIT FLOW ---
+        const paidById = data.paidBy || user?.id;
 
-        if (expenseError) throw expenseError;
+        if (isEditMode) {
+          const { error: expenseError } = await supabase
+            .from("expenses")
+            .update({
+              amount: expenseAmount,
+              description: descVal,
+              category_id: data.categoryId,
+              paid_by: paidById,
+              notes: data.notes?.trim() || null,
+              expense_date: isoDate,
+              receipt_url: data.receiptUrl?.trim() || null,
+            })
+            .eq("id", expenseId);
 
-        // 2. Insert splits linked to the new expense
-        const splitsPayload = computedSplits.map((split: any) => ({
-          expense_id: newExpense.id,
-          debtor_id: split.debtorId,
-          amount: split.amount,
-          share_ratio: split.shareRatio,
-        }));
+          if (expenseError) throw expenseError;
 
-        const { error: splitsError } = await supabase.from("expense_splits").insert(splitsPayload);
-        if (splitsError) throw splitsError;
+          const { error: deleteSplitsError } = await supabase
+            .from("expense_splits")
+            .delete()
+            .eq("expense_id", expenseId);
 
-        showToast("Expense added successfully", "success");
+          if (deleteSplitsError) throw deleteSplitsError;
+
+          const splitsPayload = computedSplits.map((split: any) => ({
+            expense_id: expenseId,
+            debtor_id: split.debtorId,
+            amount: split.amount,
+            share_ratio: split.shareRatio,
+          }));
+
+          const { error: insertSplitsError } = await supabase
+            .from("expense_splits")
+            .insert(splitsPayload);
+
+          if (insertSplitsError) throw insertSplitsError;
+
+          showToast("Expense updated successfully", "success");
+        } else {
+          const { data: newExpense, error: expenseError } = await supabase
+            .from("expenses")
+            .insert({
+              group_id: groupId,
+              amount: expenseAmount,
+              description: descVal,
+              category_id: data.categoryId,
+              paid_by: paidById,
+              notes: data.notes?.trim() || null,
+              expense_date: isoDate,
+              receipt_url: data.receiptUrl?.trim() || null,
+            })
+            .select()
+            .single();
+
+          if (expenseError) throw expenseError;
+
+          const splitsPayload = computedSplits.map((split: any) => ({
+            expense_id: newExpense.id,
+            debtor_id: split.debtorId,
+            amount: split.amount,
+            share_ratio: split.shareRatio,
+          }));
+
+          const { error: splitsError } = await supabase.from("expense_splits").insert(splitsPayload);
+          if (splitsError) throw splitsError;
+
+          showToast("Expense added successfully", "success");
+        }
       }
 
       Theme.haptics.success();
@@ -245,7 +343,6 @@ export default function AddExpense() {
     const memberIds = members.map((m: any) => m.profile.id);
 
     if (splitMode === "equal") {
-      // 1. EQUAL SPLIT
       const equalRatios = memberIds.map(() => 1);
       const splitAmounts = distributeShares(total, equalRatios);
       return memberIds.map((id: string, index: number) => ({
@@ -256,7 +353,6 @@ export default function AddExpense() {
     }
 
     if (splitMode === "shares") {
-      // 2. PORTIONAL RATIO SHARES
       const memberShares = memberIds.map((id: string) => Number(shares[id]) || 0);
       const totalShares = memberShares.reduce((sum: number, s: number) => sum + s, 0);
 
@@ -274,7 +370,6 @@ export default function AddExpense() {
     }
 
     if (splitMode === "percent") {
-      // 3. PERCENTAGE SPLIT
       const pctValues = memberIds.map((id: string) => Number(percentages[id]) || 0);
       const sumPct = pctValues.reduce((sum: number, p: number) => sum + p, 0);
 
@@ -287,12 +382,10 @@ export default function AddExpense() {
         roundToTwoDecimals((total * pctValues[index]) / 100)
       );
 
-      // Verify penny sums
       const currentSum = splitAmounts.reduce((sum: number, a: number) => safeAdd(sum, a), 0);
       let difference = roundToTwoDecimals(total - currentSum);
 
       if (difference !== 0) {
-        // Adjust the penny remainder to the first participant with > 0%
         const adjustIndex = pctValues.findIndex((v: number) => v > 0);
         if (adjustIndex !== -1) {
           splitAmounts[adjustIndex] = safeAdd(splitAmounts[adjustIndex], difference);
@@ -307,7 +400,6 @@ export default function AddExpense() {
     }
 
     if (splitMode === "exact") {
-      // 4. EXACT AMOUNT SPLIT
       const amtValues = memberIds.map((id: string) => Number(exactAmounts[id]) || 0);
       const sumAmt = amtValues.reduce((sum: number, a: number) => safeAdd(sum, a), 0);
 
@@ -328,14 +420,14 @@ export default function AddExpense() {
 
   if (isMembersLoading || isCategoriesLoading || isExpenseLoading) {
     return (
-      <View className="flex-1 justify-center items-center bg-background">
-        <ActivityIndicator size="large" color="#00F5D4" />
+      <View style={{ flex: 1, backgroundColor: "#0B1220" }} className="justify-center items-center">
+        <ActivityIndicator size="large" color="#14E5D4" />
       </View>
     );
   }
 
   return (
-    <View className="flex-1 bg-background pt-14">
+    <SafeAreaView style={{ flex: 1, backgroundColor: "#0B1220" }}>
       {/* Header */}
       <View className="flex-row justify-between items-center px-6 pb-4 border-b-[0.5px] border-border mb-6">
         <TouchableOpacity
@@ -345,7 +437,7 @@ export default function AddExpense() {
           }}
           className="p-1 rounded-full bg-surfaceLight border-[0.5px] border-border"
         >
-          <ChevronLeft size={20} color="#00F5D4" />
+          <ChevronLeft size={20} color={Colors.accentCyan} />
         </TouchableOpacity>
         <Text className="text-white text-lg font-bold">
           {isEditMode ? "Edit Expense" : "Add Expense"}
@@ -448,36 +540,165 @@ export default function AddExpense() {
 
           {/* Paid By Selector */}
           <View>
-            <Text className="text-accentGray text-xs font-bold uppercase tracking-widest mb-2">
-              Paid By
-            </Text>
-            <View className="flex-row flex-wrap gap-2">
-              {members?.map((m: any) => {
-                const isSelected = watch("paidBy") === m.profile.id;
-                return (
-                  <TouchableOpacity
-                    key={m.profile.id}
-                    onPress={() => {
-                      Theme.haptics.light();
-                      setValue("paidBy", m.profile.id);
-                    }}
-                    className={`px-3 py-2 rounded-xl border-[0.5px] ${
-                      isSelected
-                        ? "bg-accentCyan/10 border-accentCyan"
-                        : "bg-surface border-border"
-                    }`}
-                  >
-                    <Text
-                      className={`text-xs font-bold ${
-                        isSelected ? "text-accentCyan" : "text-accentGray"
+            <View className="flex-row justify-between items-center mb-2">
+              <Text className="text-accentGray text-xs font-bold uppercase tracking-widest">
+                Paid By
+              </Text>
+              {!isEditMode && (
+                <TouchableOpacity
+                  onPress={() => {
+                    Theme.haptics.light();
+                    setIsMultiplePayers(!isMultiplePayers);
+                  }}
+                  className={`px-2.5 py-1 rounded-lg border ${
+                    isMultiplePayers ? "bg-[#14E5D4]/10 border-[#14E5D4]" : "bg-surface border-border"
+                  }`}
+                >
+                  <Text className={`text-[10px] font-bold ${isMultiplePayers ? "text-[#14E5D4]" : "text-accentGray"}`}>
+                    {isMultiplePayers ? "Multiple Payers" : "Single Payer"}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {isMultiplePayers && !isEditMode ? (
+              <View className="bg-surface border-[0.5px] border-border rounded-2xl p-4 space-y-3">
+                <Text className="text-accentGray text-[10px] mb-2 leading-relaxed">
+                  Enter payments. Sum of payments must equal total amount.
+                </Text>
+                {members?.map((m: any) => (
+                  <View key={m.profile.id} className="flex-row items-center justify-between mb-2">
+                    <Text className="text-white text-xs font-semibold">
+                      {m.profile.username ? `@${m.profile.username}` : m.profile.display_name}
+                    </Text>
+                    <View className="flex-row items-center bg-surfaceLight border-[0.5px] border-border rounded-lg px-2 py-1 w-24">
+                      <Text className="text-accentCyan text-xs mr-1">₹</Text>
+                      <TextInput
+                        className="text-white text-xs text-center flex-1 py-1"
+                        keyboardType="numeric"
+                        placeholder="0.00"
+                        value={payerPayments[m.profile.id] || ""}
+                        onChangeText={(val) => {
+                          const newPayments = { ...payerPayments, [m.profile.id]: val };
+                          setPayerPayments(newPayments);
+                        }}
+                      />
+                    </View>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <View className="flex-row flex-wrap gap-2">
+                {members?.map((m: any) => {
+                  const isSelected = watch("paidBy") === m.profile.id;
+                  return (
+                    <TouchableOpacity
+                      key={m.profile.id}
+                      onPress={() => {
+                        Theme.haptics.light();
+                        setValue("paidBy", m.profile.id);
+                      }}
+                      className={`px-3 py-2 rounded-xl border-[0.5px] ${
+                        isSelected
+                          ? "bg-accentCyan/10 border-accentCyan"
+                          : "bg-surface border-border"
                       }`}
                     >
-                      {m.profile.display_name}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
+                      <Text
+                        className={`text-xs font-bold ${
+                          isSelected ? "text-accentCyan" : "text-accentGray"
+                        }`}
+                      >
+                        {m.profile.username ? `@${m.profile.username}` : m.profile.display_name}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            )}
+          </View>
+
+          {/* Date Picker (Custom input) */}
+          <View>
+            <Text className="text-accentGray text-xs font-bold uppercase tracking-widest mb-2">
+              Expense Date (YYYY-MM-DD)
+            </Text>
+            <View className="flex-row items-center bg-surface border-[0.5px] border-border rounded-xl px-4 py-3">
+              <Calendar size={16} color="#94A3B8" className="mr-2" />
+              <Controller
+                control={control}
+                name="expenseDate"
+                render={({ field: { onChange, onBlur, value } }) => (
+                  <TextInput
+                    className="flex-1 text-white text-sm py-1"
+                    placeholder="YYYY-MM-DD"
+                    placeholderTextColor="#666666"
+                    onBlur={onBlur}
+                    onChangeText={onChange}
+                    value={value}
+                  />
+                )}
+              />
             </View>
+            {errors.expenseDate && (
+              <Text className="text-accentPink text-xs mt-1">{errors.expenseDate.message}</Text>
+            )}
+          </View>
+
+          {/* Notes */}
+          <View>
+            <Text className="text-accentGray text-xs font-bold uppercase tracking-widest mb-2">
+              Notes (Optional)
+            </Text>
+            <View className="flex-row bg-surface border-[0.5px] border-border rounded-xl px-4 py-3">
+              <FileText size={16} color="#94A3B8" className="mr-2 mt-1" />
+              <Controller
+                control={control}
+                name="notes"
+                render={({ field: { onChange, onBlur, value } }) => (
+                  <TextInput
+                    className="flex-1 text-white text-sm py-1"
+                    placeholder="e.g. Paid via UPI, hostel dinner bill"
+                    placeholderTextColor="#666666"
+                    multiline
+                    numberOfLines={3}
+                    onBlur={onBlur}
+                    onChangeText={onChange}
+                    value={value}
+                  />
+                )}
+              />
+            </View>
+            {errors.notes && (
+              <Text className="text-accentPink text-xs mt-1">{errors.notes.message}</Text>
+            )}
+          </View>
+
+          {/* Receipt URL / Link */}
+          <View>
+            <Text className="text-accentGray text-xs font-bold uppercase tracking-widest mb-2">
+              Receipt Link / Image URL (Optional)
+            </Text>
+            <View className="flex-row items-center bg-surface border-[0.5px] border-border rounded-xl px-4 py-3">
+              <Image size={16} color="#94A3B8" className="mr-2" />
+              <Controller
+                control={control}
+                name="receiptUrl"
+                render={({ field: { onChange, onBlur, value } }) => (
+                  <TextInput
+                    className="flex-1 text-white text-sm py-1"
+                    placeholder="e.g. https://receipt-url.com/img.jpg"
+                    placeholderTextColor="#666666"
+                    onBlur={onBlur}
+                    onChangeText={onChange}
+                    value={value}
+                  />
+                )}
+              />
+            </View>
+            {errors.receiptUrl && (
+              <Text className="text-accentPink text-xs mt-1">{errors.receiptUrl.message}</Text>
+            )}
           </View>
 
           {/* SPLIT TYPE TABS */}
@@ -495,7 +716,7 @@ export default function AddExpense() {
                   splitMode === "equal" ? "bg-surfaceLight" : ""
                 }`}
               >
-                <Users size={14} color={splitMode === "equal" ? "#00F5D4" : "#A3A3A3"} />
+                <Users size={14} color={splitMode === "equal" ? Colors.accentCyan : "#A3A3A3"} />
                 <Text
                   className={`text-xs font-bold ml-1 ${
                     splitMode === "equal" ? "text-accentCyan" : "text-accentGray"
@@ -514,7 +735,7 @@ export default function AddExpense() {
                   splitMode === "shares" ? "bg-surfaceLight" : ""
                 }`}
               >
-                <Scale size={14} color={splitMode === "shares" ? "#00F5D4" : "#A3A3A3"} />
+                <Scale size={14} color={splitMode === "shares" ? Colors.accentCyan : "#A3A3A3"} />
                 <Text
                   className={`text-xs font-bold ml-1 ${
                     splitMode === "shares" ? "text-accentCyan" : "text-accentGray"
@@ -533,7 +754,7 @@ export default function AddExpense() {
                   splitMode === "percent" ? "bg-surfaceLight" : ""
                 }`}
               >
-                <Percent size={14} color={splitMode === "percent" ? "#00F5D4" : "#A3A3A3"} />
+                <Percent size={14} color={splitMode === "percent" ? Colors.accentCyan : "#A3A3A3"} />
                 <Text
                   className={`text-xs font-bold ml-1 ${
                     splitMode === "percent" ? "text-accentCyan" : "text-accentGray"
@@ -552,7 +773,7 @@ export default function AddExpense() {
                   splitMode === "exact" ? "bg-surfaceLight" : ""
                 }`}
               >
-                <DollarSign size={14} color={splitMode === "exact" ? "#00F5D4" : "#A3A3A3"} />
+                <DollarSign size={14} color={splitMode === "exact" ? Colors.accentCyan : "#A3A3A3"} />
                 <Text
                   className={`text-xs font-bold ml-1 ${
                     splitMode === "exact" ? "text-accentCyan" : "text-accentGray"
@@ -574,7 +795,9 @@ export default function AddExpense() {
                     const eqShare = totalAmount > 0 ? roundToTwoDecimals(totalAmount / members.length) : 0;
                     return (
                       <View key={m.profile.id} className="flex-row justify-between py-2 border-b-[0.5px] border-neutral-900">
-                        <Text className="text-white text-sm">{m.profile.display_name}</Text>
+                        <Text className="text-white text-sm">
+                          {m.profile.username ? `@${m.profile.username}` : m.profile.display_name}
+                        </Text>
                         <Text className="text-accentCyan font-bold text-sm">₹ {eqShare}</Text>
                       </View>
                     );
@@ -590,7 +813,9 @@ export default function AddExpense() {
                 </Text>
                 {members?.map((m: any) => (
                   <View key={m.profile.id} className="flex-row items-center justify-between mb-3">
-                    <Text className="text-white text-sm font-semibold">{m.profile.display_name}</Text>
+                    <Text className="text-white text-sm font-semibold">
+                      {m.profile.username ? `@${m.profile.username}` : m.profile.display_name}
+                    </Text>
                     <TextInput
                       className="bg-surfaceLight border-[0.5px] border-border text-white text-sm text-center px-3 py-1.5 rounded-lg w-16"
                       keyboardType="numeric"
@@ -612,7 +837,9 @@ export default function AddExpense() {
                 </Text>
                 {members?.map((m: any) => (
                   <View key={m.profile.id} className="flex-row items-center justify-between mb-3">
-                    <Text className="text-white text-sm font-semibold">{m.profile.display_name}</Text>
+                    <Text className="text-white text-sm font-semibold">
+                      {m.profile.username ? `@${m.profile.username}` : m.profile.display_name}
+                    </Text>
                     <View className="flex-row items-center bg-surfaceLight border-[0.5px] border-border rounded-lg px-2 py-1.5 w-20">
                       <TextInput
                         className="text-white text-sm text-center flex-1"
@@ -638,7 +865,9 @@ export default function AddExpense() {
                 </Text>
                 {members?.map((m: any) => (
                   <View key={m.profile.id} className="flex-row items-center justify-between mb-3">
-                    <Text className="text-white text-sm font-semibold">{m.profile.display_name}</Text>
+                    <Text className="text-white text-sm font-semibold">
+                      {m.profile.username ? `@${m.profile.username}` : m.profile.display_name}
+                    </Text>
                     <View className="flex-row items-center bg-surfaceLight border-[0.5px] border-border rounded-lg px-2 py-1.5 w-24">
                       <Text className="text-accentCyan text-xs mr-1">₹</Text>
                       <TextInput
@@ -677,6 +906,6 @@ export default function AddExpense() {
           </TouchableOpacity>
         </View>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }

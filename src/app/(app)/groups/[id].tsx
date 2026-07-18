@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { simplifyDebts } from "../../../utils/math";
 import {
@@ -9,6 +9,8 @@ import {
   FlatList,
   TextInput,
   Modal,
+  ScrollView,
+  RefreshControl,
 } from "react-native";
 import { useLocalSearchParams, useRouter, Link } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -16,6 +18,7 @@ import { useAuthStore } from "../../../store/authStore";
 import { supabase } from "../../../services/supabase";
 import { useToastStore } from "../../../store/toastStore";
 import { Theme } from "../../../constants/Theme";
+import { Colors } from "../../../constants/Colors";
 import * as Clipboard from "expo-clipboard";
 import {
   ChevronLeft,
@@ -34,6 +37,8 @@ import {
   Plus,
   Droplet,
   ChevronRight,
+  UserMinus,
+  AlertCircle
 } from "lucide-react-native";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -50,7 +55,7 @@ const editGroupSchema = z.object({
 type EditGroupSchema = z.infer<typeof editGroupSchema>;
 
 export default function GroupDetail() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, tab } = useLocalSearchParams<{ id: string; tab?: string }>();
   const router = useRouter();
   const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
@@ -59,7 +64,23 @@ export default function GroupDetail() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isLeaving, setIsLeaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<"ledger" | "balances" | "members">("ledger");
+  const [activeTab, setActiveTab] = useState<"expenses" | "balances" | "members" | "activity" | "analytics" | "settlements">((tab as any) || "expenses");
+  const [simplifyDebtsEnabled, setSimplifyDebtsEnabled] = useState(true);
+
+  // Settle Modal fields
+  const [isSettleModalOpen, setIsSettleModalOpen] = useState(false);
+  const [settlementFrom, setSettlementFrom] = useState("");
+  const [settlementTo, setSettlementTo] = useState("");
+  const [settlementAmount, setSettlementAmount] = useState("");
+  const [settlementOutstanding, setSettlementOutstanding] = useState(0);
+  const [settlementNotes, setSettlementNotes] = useState("");
+  const [settlementDate, setSettlementDate] = useState("");
+
+  useEffect(() => {
+    if (tab) {
+      setActiveTab(tab as any);
+    }
+  }, [tab]);
 
   // 1. Fetch group details
   const { data: group, isLoading: isGroupLoading } = useQuery({
@@ -78,7 +99,7 @@ export default function GroupDetail() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("group_members")
-        .select("role, profile:profiles(*)")
+        .select("role, joined_at, profile:profiles(*)")
         .eq("group_id", id);
 
       if (error) throw error;
@@ -88,7 +109,7 @@ export default function GroupDetail() {
   });
 
   // 2.5. Fetch group expenses listing
-  const { data: expenses, isLoading: isExpensesLoading, refetch: refetchExpenses } = useQuery({
+  const { data: expenses, isLoading: isExpensesLoading } = useQuery({
     queryKey: ["group-expenses", id],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -120,15 +141,15 @@ export default function GroupDetail() {
 
   // Mutation to record a settlement payment
   const settleMutation = useMutation({
-    mutationFn: async (settlement: { from: string; to: string; amount: number }) => {
-      // Fetch default category 'Other'
+    mutationFn: async (settlement: { from: string; to: string; amount: number; notes?: string; date?: string }) => {
       const { data: cat } = await supabase
         .from("categories")
         .select("id")
         .eq("name", "Other")
         .single();
 
-      // Insert settlement expense row (starts as unconfirmed/pending)
+      const isoDate = settlement.date ? new Date(settlement.date).toISOString() : new Date().toISOString();
+
       const { data: newExpense, error: expError } = await supabase
         .from("expenses")
         .insert({
@@ -138,14 +159,15 @@ export default function GroupDetail() {
           description: "Settlement Payment",
           category_id: cat?.id,
           is_settlement: true,
-          is_confirmed: false,
+          is_confirmed: true,
+          notes: settlement.notes || null,
+          expense_date: isoDate,
         })
         .select()
         .single();
 
       if (expError) throw expError;
 
-      // Insert matching split row for recipient
       const { error: splitError } = await supabase
         .from("expense_splits")
         .insert({
@@ -160,7 +182,11 @@ export default function GroupDetail() {
       Theme.haptics.success();
       queryClient.invalidateQueries({ queryKey: ["group-expenses", id] });
       queryClient.invalidateQueries({ queryKey: ["peer-balances", id] });
-      showToast("Settlement payment recorded. Pending recipient confirmation.", "success", 5000);
+      queryClient.invalidateQueries({ queryKey: ["dashboard-peer-balances"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-personal-expenses"] });
+      queryClient.invalidateQueries({ queryKey: ["groups"] });
+      showToast("Settlement recorded successfully", "success");
+      setIsSettleModalOpen(false);
     },
     onError: (error: any) => {
       Theme.haptics.error();
@@ -168,7 +194,26 @@ export default function GroupDetail() {
     },
   });
 
-  // Mutation to confirm a settlement payment (Mark as Paid)
+  const transferOwnershipMutation = useMutation({
+    mutationFn: async (newOwnerId: string) => {
+      const { error } = await supabase
+        .from("groups")
+        .update({ created_by: newOwnerId })
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      Theme.haptics.success();
+      queryClient.invalidateQueries({ queryKey: ["group", id] });
+      showToast("Group ownership transferred successfully", "success");
+    },
+    onError: (error: any) => {
+      Theme.haptics.error();
+      showToast(error.message || "Failed to transfer ownership", "error");
+    },
+  });
+
+  // Mutation to confirm a settlement payment
   const confirmSettlementMutation = useMutation({
     mutationFn: async (expenseId: string) => {
       const { error } = await supabase
@@ -207,7 +252,29 @@ export default function GroupDetail() {
     },
   });
 
-  // 3. Determine active user's role in the group
+  // Mutation to remove a member (Admin only)
+  const removeMemberMutation = useMutation({
+    mutationFn: async (profileId: string) => {
+      const { error } = await supabase
+        .from("group_members")
+        .delete()
+        .eq("group_id", id)
+        .eq("profile_id", profileId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      Theme.haptics.success();
+      queryClient.invalidateQueries({ queryKey: ["group-members", id] });
+      queryClient.invalidateQueries({ queryKey: ["peer-balances", id] });
+      showToast("Member removed from group", "success");
+    },
+    onError: (error: any) => {
+      Theme.haptics.error();
+      showToast(error.message || "Failed to remove member", "error");
+    },
+  });
+
+  // Determine active user's role in the group
   const userMemberInfo = members?.find((m: any) => m.profile?.id === user?.id);
   const isAdmin = userMemberInfo?.role === "admin";
 
@@ -215,7 +282,6 @@ export default function GroupDetail() {
     control,
     handleSubmit,
     formState: { errors },
-    reset,
   } = useForm<EditGroupSchema>({
     resolver: zodResolver(editGroupSchema),
     values: {
@@ -309,17 +375,195 @@ export default function GroupDetail() {
     }
   };
 
+  // Calculate net balances for each group member
+  const netBalances = useMemo(() => {
+    const balances: Record<string, number> = {};
+    if (members) {
+      members.forEach((m: any) => {
+        balances[m.profile.id] = 0;
+      });
+    }
+
+    if (peerBalances && peerBalances.length > 0) {
+      peerBalances.forEach((row: any) => {
+        balances[row.user_a_id] = (balances[row.user_a_id] || 0) + Number(row.net_balance);
+        balances[row.user_b_id] = (balances[row.user_b_id] || 0) - Number(row.net_balance);
+      });
+    } else if (expenses) {
+      expenses.forEach((exp: any) => {
+        if (exp.is_settlement && !exp.is_confirmed) return;
+        const payerId = exp.paid_by;
+        const totalAmount = Number(exp.amount) || 0;
+        if (balances[payerId] !== undefined) balances[payerId] += totalAmount;
+        if (exp.splits) {
+          exp.splits.forEach((split: any) => {
+            const debtorId = split.debtor_id;
+            const splitAmount = Number(split.amount) || 0;
+            if (balances[debtorId] !== undefined) balances[debtorId] -= splitAmount;
+          });
+        }
+      });
+    }
+    return balances;
+  }, [members, peerBalances, expenses]);
+
+  // Calculate raw peer-to-peer debts
+  const rawDebts = useMemo(() => {
+    const list: any[] = [];
+    peerBalances?.forEach((pb: any) => {
+      const bal = Number(pb.net_balance);
+      if (bal > 0.01) {
+        list.push({ from: pb.user_b_id, to: pb.user_a_id, amount: bal });
+      } else if (bal < -0.01) {
+        list.push({ from: pb.user_a_id, to: pb.user_b_id, amount: Math.abs(bal) });
+      }
+    });
+    return list;
+  }, [peerBalances]);
+
+  // Derived activity logs list
+  const activityList = useMemo(() => {
+    const list: any[] = [];
+    if (members) {
+      members.forEach((m: any) => {
+        list.push({
+          id: `joined-${m.profile.id}`,
+          type: "joined",
+          date: new Date(m.joined_at || group?.created_at || Date.now()),
+          title: `${m.profile.username ? `@${m.profile.username}` : m.profile.display_name} joined`,
+          subtitle: `Joined as a ${m.role}`,
+          icon: "👤",
+        });
+      });
+    }
+    if (expenses) {
+      expenses.forEach((exp: any) => {
+        if (exp.is_settlement) {
+          const recipient = exp.splits?.[0]?.debtor;
+          list.push({
+            id: `settle-${exp.id}`,
+            type: "settle",
+            date: new Date(exp.expense_date),
+            title: `${exp.payer?.username ? `@${exp.payer.username}` : exp.payer?.display_name || "Someone"} paid ${recipient?.username ? `@${recipient.username}` : recipient?.display_name || "Someone"} ₹${Number(exp.amount).toFixed(0)}`,
+            subtitle: exp.notes ? `"${exp.notes}"` : "Settlement payment",
+            icon: "🤝",
+          });
+        } else {
+          list.push({
+            id: `expense-${exp.id}`,
+            type: "expense",
+            date: new Date(exp.expense_date),
+            title: `${exp.payer?.username ? `@${exp.payer.username}` : exp.payer?.display_name || "Someone"} added "${exp.description}"`,
+            subtitle: `₹${exp.amount} • ${exp.category?.name || "Other"}`,
+            icon: exp.category?.icon_name === "shopping-cart"
+              ? "🛒"
+              : exp.category?.icon_name === "utensils"
+              ? "🍕"
+              : exp.category?.icon_name === "home"
+              ? "🏠"
+              : "💸",
+          });
+        }
+      });
+    }
+    return list.sort((a, b) => b.date.getTime() - a.date.getTime());
+  }, [members, expenses, group]);
+
+  // Dynamic spending analytics
+  const analyticsData = useMemo(() => {
+    if (!expenses) return null;
+    const nonSettlements = expenses.filter((e: any) => !e.is_settlement);
+    const totalSpent = nonSettlements.reduce((sum: number, e: any) => sum + Number(e.amount), 0);
+    const averageExpense = nonSettlements.length > 0 ? totalSpent / nonSettlements.length : 0;
+    const largestExpense = nonSettlements.length > 0 ? Math.max(...nonSettlements.map((e: any) => Number(e.amount))) : 0;
+
+    // Spending by category
+    const catMap: Record<string, { amount: number; color: string; icon: string }> = {};
+    nonSettlements.forEach((e: any) => {
+      const name = e.category?.name || "Other";
+      const color = e.category?.color_code || Colors.accentGray;
+      const icon = e.category?.icon_name || "file-text";
+      if (!catMap[name]) {
+        catMap[name] = { amount: 0, color, icon };
+      }
+      catMap[name].amount += Number(e.amount);
+    });
+
+    const categoryList = Object.keys(catMap).map(name => ({
+      name,
+      amount: catMap[name].amount,
+      color: catMap[name].color,
+      icon: catMap[name].icon,
+      percentage: totalSpent > 0 ? (catMap[name].amount / totalSpent) * 100 : 0
+    })).sort((a, b) => b.amount - a.amount);
+
+    // Spending by member
+    const memMap: Record<string, { amount: number; name: string; avatar: string }> = {};
+    nonSettlements.forEach((e: any) => {
+      const payerId = e.paid_by;
+      const name = e.payer?.username ? `@${e.payer.username}` : e.payer?.display_name || "Unknown";
+      const avatar = e.payer?.avatar_url || "👋";
+      if (!memMap[payerId]) {
+        memMap[payerId] = { amount: 0, name, avatar };
+      }
+      memMap[payerId].amount += Number(e.amount);
+    });
+
+    const memberList = Object.keys(memMap).map(id => ({
+      id,
+      name: memMap[id].name,
+      avatar: memMap[id].avatar,
+      amount: memMap[id].amount,
+      percentage: totalSpent > 0 ? (memMap[id].amount / totalSpent) * 100 : 0
+    })).sort((a, b) => b.amount - a.amount);
+
+    return {
+      totalSpent,
+      averageExpense,
+      largestExpense,
+      categories: categoryList,
+      members: memberList
+    };
+  }, [expenses]);
+
+  const getGroupAvatarStyles = (name: string) => {
+    const firstLetter = (name || "G").charAt(0).toUpperCase();
+    const colors = [
+      { bg: "bg-red-500/10 border-red-500/20", text: "text-red-400" },
+      { bg: "bg-emerald-500/10 border-emerald-500/20", text: "text-emerald-400" },
+      { bg: "bg-blue-500/10 border-blue-500/20", text: "text-blue-400" },
+      { bg: "bg-purple-500/10 border-purple-500/20", text: "text-purple-400" },
+      { bg: "bg-yellow-500/10 border-yellow-500/20", text: "text-yellow-400" },
+      { bg: "bg-pink-500/10 border-pink-500/20", text: "text-pink-400" },
+      { bg: "bg-cyan-500/10 border-cyan-500/20", text: "text-cyan-400" },
+      { bg: "bg-orange-500/10 border-orange-500/20", text: "text-orange-400" },
+    ];
+    let sum = 0;
+    for (let i = 0; i < name.length; i++) {
+      sum += name.charCodeAt(i);
+    }
+    const color = colors[sum % colors.length];
+    return {
+      letter: firstLetter,
+      bgClass: color.bg,
+      textClass: color.text,
+    };
+  };
+
+  const simplifiedDebts = simplifyDebts(netBalances);
+  const avatar = getGroupAvatarStyles(group?.name || "G");
+
   if (isGroupLoading || isMembersLoading || isExpensesLoading || isBalancesLoading) {
     return (
-      <View className="flex-1 justify-center items-center bg-background">
-        <ActivityIndicator size="large" color="#00F5D4" />
+      <View className="flex-1 justify-center items-center bg-[#0B1220]">
+        <ActivityIndicator size="large" color={Colors.accentCyan} />
       </View>
     );
   }
 
   if (!group) {
     return (
-      <View className="flex-1 justify-center items-center bg-background px-6">
+      <View className="flex-1 justify-center items-center bg-[#0B1220] px-6">
         <Text className="text-white text-lg font-bold mb-4">Group not found</Text>
         <Link href="/(app)/(tabs)/groups" replace asChild>
           <TouchableOpacity className="bg-accentCyan px-6 py-3 rounded-xl">
@@ -330,42 +574,31 @@ export default function GroupDetail() {
     );
   }
 
-  // Calculate net balances for each group member
-  const netBalances: Record<string, number> = {};
-  if (members) {
-    members.forEach((m: any) => {
-      netBalances[m.profile.id] = 0;
-    });
-  }
-
-  if (peerBalances) {
-    peerBalances.forEach((row: any) => {
-      netBalances[row.user_a_id] = (netBalances[row.user_a_id] || 0) + Number(row.net_balance);
-      netBalances[row.user_b_id] = (netBalances[row.user_b_id] || 0) - Number(row.net_balance);
-    });
-  }
-
-  const simplifiedDebts = simplifyDebts(netBalances);
-
-  let HeaderIcon = Users;
-  if (group.type === "hostel") HeaderIcon = Home;
-  else if (group.type === "flatmates") HeaderIcon = Users2;
-  else if (group.type === "trip") HeaderIcon = Compass;
-  else if (group.type === "family") HeaderIcon = Landmark;
+  // Active list dataset
+  const listData = activeTab === "expenses"
+    ? expenses?.filter((e: any) => !e.is_settlement)
+    : activeTab === "balances"
+    ? (simplifyDebtsEnabled ? simplifiedDebts : rawDebts)
+    : activeTab === "settlements"
+    ? expenses?.filter((e: any) => e.is_settlement)
+    : activeTab === "members"
+    ? members
+    : activeTab === "activity"
+    ? activityList
+    : [];
 
   return (
-    <SafeAreaView className="flex-1 bg-background">
-      {/* Top Header Navigation */}
-      <View className="flex-row justify-between items-center px-6 pb-4 border-b-[0.5px] border-border">
+    <SafeAreaView style={{ flex: 1, backgroundColor: "#0B1220" }}>
+      {/* Top Navigation */}
+      <View className="flex-row justify-between items-center px-6 pb-4 border-b-[0.5px] border-white/5">
         <TouchableOpacity
           onPress={() => {
             Theme.haptics.light();
             router.back();
           }}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          className="p-1 rounded-full bg-surfaceLight border-[0.5px] border-border"
+          className="p-1 rounded-full bg-[#151E2E] border-[0.5px] border-white/10"
         >
-          <ChevronLeft size={20} color="#00F5D4" />
+          <ChevronLeft size={20} color={Colors.accentCyan} />
         </TouchableOpacity>
         <Text className="text-white text-lg font-bold flex-1 text-center ml-2 mr-2" numberOfLines={1}>
           {group.name}
@@ -375,54 +608,45 @@ export default function GroupDetail() {
             Theme.haptics.light();
             setIsSettingsOpen(true);
           }}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          className="p-1 rounded-full bg-surfaceLight border-[0.5px] border-border"
+          className="p-1 rounded-full bg-[#151E2E] border-[0.5px] border-white/10"
         >
-          <Settings size={20} color="#A3A3A3" />
+          <Settings size={20} color="#94A3B8" />
         </TouchableOpacity>
       </View>
 
       <FlatList
-        data={activeTab === "ledger" ? expenses : activeTab === "members" ? members : simplifiedDebts}
-        keyExtractor={(item) => item.id || item.profile?.id || `${item.from}-${item.to}`}
-        contentContainerStyle={{ padding: 24, paddingBottom: 80 }}
+        data={listData}
+        keyExtractor={(item, index) => item.id || item.profile?.id || `${item.from}-${item.to}-${index}`}
+        contentContainerStyle={{ padding: 24, paddingBottom: 100 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={isExpensesLoading || isBalancesLoading || isMembersLoading}
+            onRefresh={() => {
+              Theme.haptics.light();
+              queryClient.invalidateQueries({ queryKey: ["group", id] });
+              queryClient.invalidateQueries({ queryKey: ["group-members", id] });
+              queryClient.invalidateQueries({ queryKey: ["group-expenses", id] });
+              queryClient.invalidateQueries({ queryKey: ["peer-balances", id] });
+            }}
+            tintColor={Colors.accentCyan}
+          />
+        }
         ListHeaderComponent={
           <>
             {/* Banner Category Card */}
-            <View className="bg-surface border-[0.5px] border-border rounded-2xl p-5 mb-6 items-center">
-              <View className="w-16 h-16 justify-center items-center rounded-2xl bg-surfaceLight mb-3">
-                <HeaderIcon size={32} color="#00F5D4" />
+            <View className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-5 mb-6 items-center flex-row justify-between shadow-lg">
+              <View className="flex-row items-center flex-1 mr-4">
+                <View className={`w-12 h-12 justify-center items-center rounded-full border-[0.5px] mr-3 ${avatar.bgClass}`}>
+                  <Text className={`text-lg font-black ${avatar.textClass}`}>{avatar.letter}</Text>
+                </View>
+                <View className="flex-1">
+                  <Text className="text-white text-lg font-black">{group.name}</Text>
+                  <Text className="text-[#94A3B8] text-[10px] mt-0.5" numberOfLines={1}>
+                    {group.description || `Type: ${group.type}`}
+                  </Text>
+                </View>
               </View>
-              <Text className="text-white text-xl font-black">{group.name}</Text>
-              <Text className="text-accentGray text-xs mt-1 text-center leading-relaxed">
-                {group.description || `Currency: ${group.currency} • Type: ${group.type}`}
-              </Text>
-            </View>
-
-            {/* Invite Link Card widget */}
-            <View className="bg-surface border-[0.5px] border-border rounded-2xl p-5 mb-6">
-              <Text className="text-accentGray text-xs font-bold uppercase tracking-widest mb-2">
-                Invite Code
-              </Text>
-              <View className="flex-row items-center bg-surfaceLight border-[0.5px] border-border rounded-xl p-3">
-                <Text className="text-white font-mono text-xs flex-1 select-all mr-2" numberOfLines={1}>
-                  {group.id}
-                </Text>
-                <TouchableOpacity
-                  onPress={handleCopyInvite}
-                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                  className="bg-accentCyan w-8 h-8 justify-center items-center rounded-lg"
-                >
-                  <Copy size={14} color="#0D0D0D" />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* Roommate Trackers widget section */}
-            <View className="bg-surface border-[0.5px] border-border rounded-2xl p-5 mb-6">
-              <Text className="text-accentGray text-xs font-bold uppercase tracking-widest mb-3">
-                Roommate Trackers
-              </Text>
+              {/* Water Tracker Link */}
               <TouchableOpacity
                 onPress={() => {
                   Theme.haptics.light();
@@ -431,103 +655,117 @@ export default function GroupDetail() {
                     params: { groupId: id },
                   });
                 }}
-                className="flex-row items-center bg-surfaceLight border-[0.5px] border-border p-4 rounded-xl active:scale-[0.99]"
+                className="w-9 h-9 justify-center items-center rounded-xl bg-white/5 border-[0.5px] border-white/10"
               >
-                <View className="w-10 h-10 rounded-xl bg-surface justify-center items-center mr-3">
-                  <Droplet size={18} color="#00F5D4" />
-                </View>
-                <View className="flex-1 mr-2">
-                  <Text className="text-white text-sm font-bold">Water Jar Tracker</Text>
-                  <Text className="text-accentGray text-[10px] mt-0.5" numberOfLines={1}>
-                    Log deliveries, track monthly counts and estimated bills.
-                  </Text>
-                </View>
-                <ChevronRight size={18} color="#A3A3A3" />
+                <Droplet size={18} color={Colors.accentCyan} />
               </TouchableOpacity>
             </View>
 
-            {/* Ledger & Balances & Members Navigation Tabs */}
-            <View className="flex-row bg-surface border-[0.5px] border-border rounded-xl p-1 justify-between mb-4">
-              <TouchableOpacity
-                onPress={() => {
-                  Theme.haptics.light();
-                  setActiveTab("ledger");
-                }}
-                className={`flex-1 py-2.5 rounded-lg items-center ${
-                  activeTab === "ledger" ? "bg-surfaceLight" : ""
-                }`}
-              >
-                <Text
-                  className={`text-xs font-bold ${
-                    activeTab === "ledger" ? "text-accentCyan" : "text-accentGray"
-                  }`}
-                >
-                  Ledger
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => {
-                  Theme.haptics.light();
-                  setActiveTab("balances");
-                }}
-                className={`flex-1 py-2.5 rounded-lg items-center ${
-                  activeTab === "balances" ? "bg-surfaceLight" : ""
-                }`}
-              >
-                <Text
-                  className={`text-xs font-bold ${
-                    activeTab === "balances" ? "text-accentCyan" : "text-accentGray"
-                  }`}
-                >
-                  Balances
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => {
-                  Theme.haptics.light();
-                  setActiveTab("members");
-                }}
-                className={`flex-1 py-2.5 rounded-lg items-center ${
-                  activeTab === "members" ? "bg-surfaceLight" : ""
-                }`}
-              >
-                <Text
-                  className={`text-xs font-bold ${
-                    activeTab === "members" ? "text-accentCyan" : "text-accentGray"
-                  }`}
-                >
-                  Members
-                </Text>
-              </TouchableOpacity>
-            </View>
+            {/* Quick Stats Header widget */}
+            {activeTab === "expenses" && expenses && expenses.filter((e: any) => !e.is_settlement).length > 0 && (
+              <View className="bg-[#151E2E]/60 border-[0.5px] border-white/5 rounded-2xl p-4 mb-6 flex-row justify-between shadow-md">
+                <View className="flex-grow flex-shrink">
+                  <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-wider mb-1">Group Spent</Text>
+                  <Text className="text-white text-base font-black">₹{analyticsData?.totalSpent.toFixed(0)}</Text>
+                </View>
+                <View className="flex-grow flex-shrink items-center border-x border-white/5 px-2">
+                  <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-wider mb-1">Average</Text>
+                  <Text className="text-white text-base font-black">₹{analyticsData?.averageExpense.toFixed(0)}</Text>
+                </View>
+                <View className="flex-grow flex-shrink items-end pl-2">
+                  <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-wider mb-1">
+                    {(netBalances[user?.id || ""] || 0) > 0.01 
+                      ? "To Receive" 
+                      : (netBalances[user?.id || ""] || 0) < -0.01 
+                      ? "To Pay" 
+                      : "Net Balance"}
+                  </Text>
+                  <Text className={`text-base font-black ${
+                    (netBalances[user?.id || ""] || 0) > 0.01
+                      ? "text-[#22C55E]"
+                      : (netBalances[user?.id || ""] || 0) < -0.01
+                      ? "text-[#EF4444]"
+                      : "text-white"
+                  }`}>
+                    {(netBalances[user?.id || ""] || 0) > 0.01 ? "+" : ""}₹{(netBalances[user?.id || ""] || 0).toFixed(0)}
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            {/* Recent Activity widget */}
+            {activeTab === "expenses" && activityList.length > 0 && (
+              <View className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-4 mb-6 shadow-md">
+                <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-wider mb-2">Recent Activity</Text>
+                <View className="flex-row items-center">
+                  <View className="w-8 h-8 rounded-xl bg-white/5 justify-center items-center mr-2.5 border border-white/10">
+                    <Text className="text-sm">{activityList[0].icon}</Text>
+                  </View>
+                  <View className="flex-1">
+                    <Text className="text-white text-xs font-semibold" numberOfLines={1}>{activityList[0].title}</Text>
+                    <Text className="text-[#94A3B8] text-[9px] mt-0.5">{activityList[0].subtitle}</Text>
+                  </View>
+                </View>
+              </View>
+            )}
+
+            {/* Custom Tab Switcher */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-6">
+              <View className="flex-row bg-[#151E2E] border-[0.5px] border-white/5 rounded-xl p-1 shadow-md">
+                {(["expenses", "balances", "settlements", "members", "activity", "analytics"] as const).map((tab) => (
+                  <TouchableOpacity
+                    key={tab}
+                    onPress={() => {
+                      Theme.haptics.light();
+                      setActiveTab(tab);
+                    }}
+                    className={`px-4 py-2 rounded-lg items-center justify-center mr-1 ${
+                      activeTab === tab ? "bg-white/5 border border-white/10" : ""
+                    }`}
+                  >
+                    <Text
+                      className={`text-xs font-bold capitalize ${
+                        activeTab === tab ? "text-[#14E5D4]" : "text-[#94A3B8]"
+                      }`}
+                    >
+                      {tab === "settlements" ? "Settlements" : tab}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </ScrollView>
 
             {/* Inline Net Balances Grid shown in Balances Tab */}
             {activeTab === "balances" && (
-              <View className="bg-surface border-[0.5px] border-border rounded-2xl p-5 mb-6">
-                <Text className="text-accentGray text-xs font-bold uppercase tracking-widest mb-3">
+              <View className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-5 mb-6 shadow-lg">
+                <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-3">
                   Net Balances
                 </Text>
                 {members?.map((m: any) => {
                   const balVal = netBalances[m.profile.id] || 0;
                   const isCred = balVal > 0.01;
                   const isDeb = balVal < -0.01;
+                  const mAvatar = getGroupAvatarStyles(m.profile.username ? `@${m.profile.username}` : m.profile.display_name);
+
                   return (
                     <View
                       key={m.profile.id}
-                      className="flex-row items-center justify-between py-2.5 border-b-[0.5px] border-border"
+                      className="flex-row items-center justify-between py-2.5 border-b-[0.5px] border-white/5"
                     >
                       <View className="flex-row items-center">
-                        <Text className="text-base mr-2">{m.profile.avatar_url || "👋"}</Text>
+                        <View className={`w-8 h-8 rounded-full border-[0.5px] justify-center items-center mr-2.5 ${mAvatar.bgClass}`}>
+                          <Text className={`text-xs font-bold ${mAvatar.textClass}`}>{mAvatar.letter}</Text>
+                        </View>
                         <Text className="text-white text-sm font-semibold">
-                          {m.profile.display_name}
+                          {m.profile.username ? `@${m.profile.username}` : m.profile.display_name}
                         </Text>
                       </View>
                       <Text
                         className={`text-sm font-bold ${
-                          isCred ? "text-accentCyan" : isDeb ? "text-accentPink" : "text-accentGray"
+                          isCred ? "text-[#22C55E]" : isDeb ? "text-[#EF4444]" : "text-[#94A3B8]"
                         }`}
                       >
-                        {isCred ? `+ ₹${balVal}` : isDeb ? `- ₹${Math.abs(balVal)}` : "Settled"}
+                        {isCred ? `+ ₹${balVal.toFixed(0)}` : isDeb ? `- ₹${Math.abs(balVal).toFixed(0)}` : "Settled"}
                       </Text>
                     </View>
                   );
@@ -535,141 +773,230 @@ export default function GroupDetail() {
               </View>
             )}
 
+            {/* Balances Subheading */}
             {activeTab === "balances" && (
-              <Text className="text-accentGray text-xs font-bold uppercase tracking-widest mb-4">
-                Suggested Payments
-              </Text>
+              <View className="flex-row justify-between items-center mb-4">
+                <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest">
+                  Suggested Payments
+                </Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    Theme.haptics.light();
+                    setSimplifyDebtsEnabled(!simplifyDebtsEnabled);
+                  }}
+                  className="bg-[#151E2E] border-[0.5px] border-white/5 px-2.5 py-1 rounded-lg"
+                >
+                  <Text className="text-[10px] text-accentCyan font-bold">
+                    {simplifyDebtsEnabled ? "Debts Simplified" : "Raw Debts"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Invite card in Members Tab */}
+            {activeTab === "members" && (
+              <View className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-5 mb-6 shadow-lg">
+                <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-2">
+                  Share Invite Code
+                </Text>
+                <View className="flex-row items-center bg-white/5 border-[0.5px] border-white/10 rounded-xl p-3">
+                  <Text className="text-white font-mono text-xs flex-1 select-all mr-2" numberOfLines={1}>
+                    {group.id}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={handleCopyInvite}
+                    className="bg-accentCyan w-8 h-8 justify-center items-center rounded-lg"
+                  >
+                    <Copy size={14} color="#0D0D0D" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {/* Analytics Tab layout */}
+            {activeTab === "analytics" && analyticsData && (
+              <View className="space-y-6">
+                {/* Visual Overview */}
+                <View className="bg-[#151E2E] border-[0.5px] border-white/5 p-5 rounded-2xl shadow-lg">
+                  <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-4">Redistribution Stats</Text>
+                  <View className="space-y-4">
+                    <View className="flex-row justify-between py-1 border-b border-white/5">
+                      <Text className="text-[#94A3B8] text-xs font-medium">Total Spent</Text>
+                      <Text className="text-white text-sm font-black">₹{analyticsData.totalSpent.toFixed(0)}</Text>
+                    </View>
+                    <View className="flex-row justify-between py-1 border-b border-white/5 mt-2">
+                      <Text className="text-[#94A3B8] text-xs font-medium">Average Expense</Text>
+                      <Text className="text-white text-sm font-black">₹{analyticsData.averageExpense.toFixed(0)}</Text>
+                    </View>
+                    <View className="flex-row justify-between py-1 mt-2">
+                      <Text className="text-[#94A3B8] text-xs font-medium">Largest Expense</Text>
+                      <Text className="text-white text-sm font-black">₹{analyticsData.largestExpense.toFixed(0)}</Text>
+                    </View>
+                  </View>
+                </View>
+
+                {/* Spending by Category progress bars */}
+                <View className="bg-[#151E2E] border-[0.5px] border-white/5 p-5 rounded-2xl mt-4 shadow-lg">
+                  <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-4">By Category</Text>
+                  {analyticsData.categories.length > 0 ? (
+                    analyticsData.categories.map((c, idx) => (
+                      <View key={c.name} className={`${idx > 0 ? "mt-4" : ""}`}>
+                        <View className="flex-row justify-between items-center mb-1">
+                          <Text className="text-white text-xs font-semibold">{c.name}</Text>
+                          <Text className="text-[#94A3B8] text-xs font-bold">₹{c.amount.toFixed(0)} ({c.percentage.toFixed(0)}%)</Text>
+                        </View>
+                        <View className="h-2 bg-[#0B1220] rounded-full overflow-hidden">
+                          <View
+                            style={{ width: `${c.percentage}%`, backgroundColor: c.color }}
+                            className="h-full rounded-full"
+                          />
+                        </View>
+                      </View>
+                    ))
+                  ) : (
+                    <Text className="text-[#94A3B8] text-xs italic">No expenses logged yet.</Text>
+                  )}
+                </View>
+
+                {/* Spending by Member contribution progress bars */}
+                <View className="bg-[#151E2E] border-[0.5px] border-white/5 p-5 rounded-2xl mt-4 shadow-lg">
+                  <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-4">Payer Contribution</Text>
+                  {analyticsData.members.length > 0 ? (
+                    analyticsData.members.map((m, idx) => (
+                      <View key={m.id} className={`${idx > 0 ? "mt-4" : ""}`}>
+                        <View className="flex-row justify-between items-center mb-1">
+                          <View className="flex-row items-center">
+                            <Text className="text-xs mr-1">{m.avatar}</Text>
+                            <Text className="text-white text-xs font-semibold">{m.name}</Text>
+                          </View>
+                          <Text className="text-[#94A3B8] text-xs font-bold">₹{m.amount.toFixed(0)} ({m.percentage.toFixed(0)}%)</Text>
+                        </View>
+                        <View className="h-2 bg-[#0B1220] rounded-full overflow-hidden">
+                          <View
+                            style={{ width: `${m.percentage}%` }}
+                            className="h-full bg-accentCyan rounded-full"
+                          />
+                        </View>
+                      </View>
+                    ))
+                  ) : (
+                    <Text className="text-[#94A3B8] text-xs italic">No contributions logged.</Text>
+                  )}
+                </View>
+              </View>
             )}
           </>
         }
         renderItem={({ item }) => {
-          if (activeTab === "ledger") {
+          if (activeTab === "expenses") {
             const isPayer = item.paid_by === user?.id;
 
-            if (item.is_settlement) {
-              const recipient = item.splits?.[0]?.debtor;
-              const isRecipient = recipient?.id === user?.id;
-              const isConfirmed = item.is_confirmed;
-
-              return (
-                <View className="bg-surface border-[0.5px] border-border p-4 rounded-xl mb-3">
-                  <View className="flex-row items-center justify-between mb-2">
-                    <View className="flex-row items-center flex-1 mr-2">
-                      <View className="w-8 h-8 justify-center items-center rounded-lg bg-surfaceLight mr-2.5">
-                        <Text className="text-base">🤝</Text>
-                      </View>
-                      <View className="flex-1 mr-1">
-                        <Text className="text-white text-sm font-bold" numberOfLines={1}>
-                          {isPayer
-                            ? `You sent payment`
-                            : isRecipient
-                            ? `${item.payer?.display_name || "Someone"} sent payment`
-                            : `${item.payer?.display_name || "Someone"} paid ${recipient?.display_name || "Someone"}`}
-                        </Text>
-                        <Text className="text-accentGray text-[10px] mt-0.5">
-                          {isConfirmed ? "Settled" : "Pending confirmation"}
-                        </Text>
-                      </View>
-                    </View>
-                    <View className="items-end">
-                      <Text className="text-accentCyan font-bold text-sm">₹ {item.amount}</Text>
-                      <Text className="text-accentGray text-[9px] mt-0.5">
-                        {new Date(item.expense_date).toLocaleDateString()}
-                      </Text>
-                    </View>
+            return (
+              <View className="bg-[#151E2E] border-[0.5px] border-white/5 p-4 rounded-2xl mb-3 shadow-md">
+                <View className="flex-row items-center">
+                  <View className="w-10 h-10 justify-center items-center rounded-xl bg-white/5 mr-3">
+                    <Text className="text-base">
+                      {item.category?.icon_name === "shopping-cart"
+                        ? "🛒"
+                        : item.category?.icon_name === "utensils"
+                        ? "🍕"
+                        : item.category?.icon_name === "home"
+                        ? "🏠"
+                        : "💸"}
+                    </Text>
                   </View>
-
-                  {/* Render inline confirmation action for recipient */}
-                  {!isConfirmed && isRecipient && (
-                    <TouchableOpacity
-                      onPress={() => {
-                        Theme.haptics.medium();
-                        confirmSettlementMutation.mutate(item.id);
-                      }}
-                      disabled={confirmSettlementMutation.isPending}
-                      className="bg-accentCyan py-2 rounded-lg items-center mt-2 active:opacity-90"
-                    >
-                      <Text className="text-background text-xs font-black">
-                        {confirmSettlementMutation.isPending ? "Confirming..." : "Confirm Received"}
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-
-                  {/* Render pending text for sender */}
-                  {!isConfirmed && isPayer && (
-                    <View className="bg-surfaceLight/50 border-[0.5px] border-border/50 py-2 rounded-lg items-center mt-2 mb-1">
-                      <Text className="text-accentGray text-[10px] font-bold">Waiting for recipient confirmation...</Text>
+                  <View className="flex-1 mr-2">
+                    <Text className="text-white text-sm font-bold" numberOfLines={1}>
+                      {item.description}
+                    </Text>
+                    <Text className="text-[#94A3B8] text-[10px] mt-0.5" numberOfLines={1}>
+                      Paid by {item.payer?.username ? `@${item.payer.username}` : item.payer?.display_name || "Deleted User"}
+                    </Text>
+                  </View>
+                  <View className="items-end mr-3">
+                    <Text className="text-white font-bold text-sm">₹ {item.amount}</Text>
+                    <Text className="text-[#94A3B8] text-[9px] mt-0.5">
+                      {new Date(item.expense_date).toLocaleDateString()}
+                    </Text>
+                  </View>
+                  {isPayer && (
+                    <View className="flex-row space-x-1">
+                      <TouchableOpacity
+                        onPress={() => {
+                          Theme.haptics.light();
+                          router.push({
+                            pathname: "/groups/add-expense",
+                            params: { groupId: id, expenseId: item.id },
+                          });
+                        }}
+                        className="p-2 rounded-lg bg-white/5 mr-1 active:opacity-80 border-[0.5px] border-white/10"
+                      >
+                        <Text className="text-[#14E5D4] text-[9px] font-bold">Edit</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => {
+                          Theme.haptics.medium();
+                          deleteExpenseMutation.mutate(item.id);
+                        }}
+                        className="p-2 rounded-lg bg-white/5 active:opacity-80 border-[0.5px] border-white/10"
+                      >
+                        <Text className="text-[#EF4444] text-[9px] font-bold">Del</Text>
+                      </TouchableOpacity>
                     </View>
-                  )}
-                  
-                  {/* Allow deleting unconfirmed settlements (Payer only) */}
-                  {!isConfirmed && isPayer && (
-                    <TouchableOpacity
-                      onPress={() => {
-                        Theme.haptics.medium();
-                        deleteExpenseMutation.mutate(item.id);
-                      }}
-                      className="border-[0.5px] border-accentPink/30 py-2 rounded-lg items-center mt-1 active:opacity-85"
-                    >
-                      <Text className="text-accentPink text-[10px] font-bold">Cancel Settlement Request</Text>
-                    </TouchableOpacity>
                   )}
                 </View>
-              );
-            }
+              </View>
+            );
+          } else if (activeTab === "settlements") {
+            const recipient = item.splits?.[0]?.debtor;
+            const settlementsList = expenses?.filter((e: any) => e.is_settlement) || [];
+            const isLatest = settlementsList.length > 0 && settlementsList[0].id === item.id;
 
             return (
-              <View className="flex-row items-center bg-surface border-[0.5px] border-border p-4 rounded-xl mb-3">
-                <View className="w-10 h-10 justify-center items-center rounded-xl bg-surfaceLight mr-3">
-                  <Text className="text-base">
-                    {item.category?.icon_name === "shopping-cart"
-                      ? "🛒"
-                      : item.category?.icon_name === "utensils"
-                      ? "🍕"
-                      : item.category?.icon_name === "home"
-                      ? "🏠"
-                      : "💸"}
-                  </Text>
-                </View>
-                <View className="flex-1 mr-2">
-                  <Text className="text-white text-sm font-bold" numberOfLines={1}>
-                    {item.description}
-                  </Text>
-                  <Text className="text-accentGray text-[10px] mt-0.5" numberOfLines={1}>
-                    Paid by {item.payer?.display_name || "Deleted User"}
-                  </Text>
-                </View>
-                <View className="items-end mr-3">
-                  <Text className="text-white font-bold text-sm">₹ {item.amount}</Text>
-                  <Text className="text-accentGray text-[9px] mt-0.5">
-                    {new Date(item.expense_date).toLocaleDateString()}
-                  </Text>
-                </View>
-                {isPayer && (
-                  <View className="flex-row space-x-1">
-                    <TouchableOpacity
-                      onPress={() => {
-                        Theme.haptics.light();
-                        router.push({
-                          pathname: "/groups/add-expense",
-                          params: { groupId: id, expenseId: item.id },
-                        });
-                      }}
-                      className="p-2 rounded-lg bg-surfaceLight mr-1 active:opacity-80"
-                    >
-                      <Text className="text-accentCyan text-[9px] font-bold">Edit</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => {
-                        Theme.haptics.medium();
-                        deleteExpenseMutation.mutate(item.id);
-                      }}
-                      className="p-2 rounded-lg bg-surfaceLight active:opacity-80"
-                    >
-                      <Text className="text-accentPink text-[9px] font-bold">Del</Text>
-                    </TouchableOpacity>
+              <View className="bg-[#151E2E] border-[0.5px] border-white/5 p-4 rounded-2xl mb-3 shadow-md">
+                <View className="flex-row items-center justify-between">
+                  <View className="flex-row items-center flex-1 mr-2">
+                    <View className="w-8 h-8 justify-center items-center rounded-lg bg-[#22C55E]/10 mr-2.5">
+                      <Text className="text-base">🤝</Text>
+                    </View>
+                    <View className="flex-1">
+                      <Text className="text-white text-sm font-bold" numberOfLines={1}>
+                        {item.payer?.username ? `@${item.payer.username}` : item.payer?.display_name || "Someone"} paid {recipient?.username ? `@${recipient.username}` : recipient?.display_name || "Someone"}
+                      </Text>
+                      {item.notes ? (
+                        <Text className="text-[#94A3B8] text-[10px] mt-0.5 italic">
+                          "{item.notes}"
+                        </Text>
+                      ) : null}
+                      <Text className="text-[#94A3B8] text-[9px] mt-1">
+                        {new Date(item.expense_date).toLocaleDateString()} • {new Date(item.expense_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </Text>
+                    </View>
                   </View>
-                )}
+                  <View className="items-end justify-center">
+                    <Text className="text-[#22C55E] font-extrabold text-sm">₹ {item.amount}</Text>
+                    {isLatest && (
+                      <TouchableOpacity
+                        onPress={() => {
+                          Theme.haptics.medium();
+                          deleteExpenseMutation.mutate(item.id);
+                        }}
+                        style={{
+                          marginTop: 6,
+                          backgroundColor: "rgba(239, 68, 68, 0.1)",
+                          borderColor: "rgba(239, 68, 68, 0.2)",
+                          borderWidth: 0.5,
+                          borderRadius: 8,
+                          paddingHorizontal: 8,
+                          paddingVertical: 4,
+                        }}
+                        className="active:opacity-85"
+                      >
+                        <Text style={{ color: "#EF4444", fontSize: 9, fontWeight: "800" }}>Delete</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
               </View>
             );
           } else if (activeTab === "balances") {
@@ -678,199 +1005,375 @@ export default function GroupDetail() {
             const canSettle = item.from === user?.id || item.to === user?.id;
 
             return (
-              <View className="flex-row items-center justify-between bg-surface border-[0.5px] border-border p-4 rounded-xl mb-3">
+              <View className="flex-row items-center justify-between bg-[#151E2E] border-[0.5px] border-white/5 p-4 rounded-2xl mb-3 shadow-md">
                 <View className="flex-1 mr-3">
                   <Text className="text-white text-sm font-semibold">
-                    {fromMember?.display_name || "Someone"} owes {toMember?.display_name || "Someone"}
+                    {fromMember?.id === user?.id
+                      ? `To Pay: ${toMember?.username ? `@${toMember.username}` : toMember?.display_name || "Someone"}`
+                      : toMember?.id === user?.id
+                      ? `${fromMember?.username ? `@${fromMember.username}` : fromMember?.display_name || "Someone"} to pay you`
+                      : `${fromMember?.username ? `@${fromMember.username}` : fromMember?.display_name || "Someone"} owes ${toMember?.username ? `@${toMember.username}` : toMember?.display_name || "Someone"}`}
                   </Text>
-                  <Text className="text-accentGray text-xs mt-1">₹ {item.amount}</Text>
+                  <Text className={`text-xs mt-1 font-bold ${
+                    fromMember?.id === user?.id 
+                      ? "text-[#EF4444]" 
+                      : toMember?.id === user?.id 
+                      ? "text-[#22C55E]" 
+                      : "text-[#94A3B8]"
+                  }`}>
+                    ₹ {item.amount.toFixed(0)}
+                  </Text>
                 </View>
                 {canSettle && (
                   <TouchableOpacity
                     onPress={() => {
                       Theme.haptics.medium();
-                      settleMutation.mutate(item);
+                      setSettlementFrom(item.from);
+                      setSettlementTo(item.to);
+                      setSettlementAmount(item.amount.toFixed(0));
+                      setSettlementOutstanding(item.amount);
+                      setSettlementNotes("");
+                      setSettlementDate(new Date().toISOString().split("T")[0]);
+                      setIsSettleModalOpen(true);
                     }}
-                    disabled={settleMutation.isPending}
-                    className="bg-accentCyan px-3 py-2 rounded-xl active:opacity-90"
+                    className="bg-[#14E5D4] px-4 py-2.5 rounded-xl active:opacity-90 shadow-md shadow-[#14E5D4]/20"
                   >
-                    <Text className="text-background text-xs font-black">
-                      {settleMutation.isPending ? "..." : "Settle"}
-                    </Text>
+                    <Text className="text-[#0B1220] text-xs font-black">Settle</Text>
                   </TouchableOpacity>
                 )}
               </View>
             );
-          } else {
+          } else if (activeTab === "members") {
+            const isSelf = item.profile.id === user?.id;
+            const mAvatar = getGroupAvatarStyles(item.profile.username ? `@${item.profile.username}` : item.profile.display_name);
+
             return (
-              <View className="flex-row items-center bg-surface border-[0.5px] border-border p-4 rounded-xl mb-3">
-                <View className="w-10 h-10 justify-center items-center rounded-full bg-surfaceLight mr-3">
-                  <Text className="text-base">{item.profile.avatar_url || "👋"}</Text>
+              <View className="bg-[#151E2E] border-[0.5px] border-white/5 p-4 rounded-2xl mb-3 shadow-md">
+                <View className="flex-row items-center mb-3">
+                  <View className={`w-10 h-10 border-[0.5px] justify-center items-center rounded-full mr-3 ${mAvatar.bgClass}`}>
+                    <Text className={`text-sm font-bold ${mAvatar.textClass}`}>{mAvatar.letter}</Text>
+                  </View>
+                  <View className="flex-1">
+                    <Text className="text-white text-sm font-bold">
+                      {item.profile.username ? `@${item.profile.username}` : item.profile.display_name}
+                    </Text>
+                    {item.profile.username && (
+                      <Text className="text-[#94A3B8] text-[10px] mt-0.5">{item.profile.display_name}</Text>
+                    )}
+                    <Text className="text-[#94A3B8] text-[9px] mt-0.5">Joined: {new Date(item.joined_at).toLocaleDateString("en-IN", { day: 'numeric', month: 'short', year: 'numeric' })}</Text>
+                  </View>
+                </View>
+                <View className="flex-row items-center justify-end space-x-2">
+                  {group.created_by === item.profile.id && (
+                    <View className="bg-[#22C55E]/10 border-[0.5px] border-[#22C55E] px-2.5 py-1 rounded mr-1">
+                      <Text className="text-[#22C55E] text-[9px] font-bold">Owner</Text>
+                    </View>
+                  )}
+                  {item.role === "admin" && group.created_by !== item.profile.id && (
+                    <View className="bg-[#14E5D4]/10 border-[0.5px] border-[#14E5D4] px-2.5 py-1 rounded mr-1">
+                      <Text className="text-[#14E5D4] text-[9px] font-bold">Admin</Text>
+                    </View>
+                  )}
+                  
+                  {group.created_by === user?.id && !isSelf && (
+                    <TouchableOpacity
+                      onPress={() => {
+                        Theme.haptics.medium();
+                        transferOwnershipMutation.mutate(item.profile.id);
+                      }}
+                      className="p-2 bg-[#14E5D4]/10 rounded-xl border border-[#14E5D4]/20 active:scale-95 mr-1"
+                    >
+                      <Text className="text-[#14E5D4] text-[9px] font-bold">Make Owner</Text>
+                    </TouchableOpacity>
+                  )}
+                  
+                  {isAdmin && !isSelf && (
+                    <TouchableOpacity
+                      onPress={() => {
+                        Theme.haptics.medium();
+                        removeMemberMutation.mutate(item.profile.id);
+                      }}
+                      className="p-2 bg-white/5 rounded-xl border border-white/10 active:scale-95"
+                    >
+                      <UserMinus size={14} color="#EF4444" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+            );
+          } else if (activeTab === "activity") {
+            return (
+              <View className="flex-row bg-[#151E2E] border-[0.5px] border-white/5 p-4 rounded-2xl mb-3 items-center shadow-md">
+                <View className="w-9 h-9 rounded-xl bg-white/5 justify-center items-center mr-3 border border-white/10">
+                  <Text className="text-base">{item.icon}</Text>
                 </View>
                 <View className="flex-1">
-                  <Text className="text-white text-sm font-bold">{item.profile.display_name}</Text>
-                  <Text className="text-accentGray text-[10px] mt-0.5">{item.profile.email}</Text>
+                  <Text className="text-white text-xs font-semibold">{item.title}</Text>
+                  <Text className="text-[#94A3B8] text-[9px] mt-0.5">{item.subtitle}</Text>
                 </View>
-                {item.role === "admin" && (
-                  <View className="bg-accentCyan/10 border-[0.5px] border-accentCyan px-2 py-1 rounded">
-                    <Text className="text-accentCyan text-[9px] font-bold">Admin</Text>
-                  </View>
-                )}
+                <Text className="text-[#94A3B8] text-[9px] font-medium">
+                  {item.date.toLocaleDateString()}
+                </Text>
               </View>
             );
           }
+          return null;
         }}
         ListEmptyComponent={
-          <View className="py-12 items-center justify-center px-4 bg-surface rounded-2xl border-[0.5px] border-border">
-            <Text className="text-white text-base font-bold text-center mb-1">
-              {activeTab === "ledger"
-                ? "No Expenses Logged"
-                : activeTab === "balances"
-                ? "Ledger Fully Settled"
-                : "No Roommates Yet"}
-            </Text>
-            <Text className="text-accentGray text-xs text-center leading-relaxed">
-              {activeTab === "ledger"
-                ? "Tap the '+' button below to split your first bill with the roommates!"
-                : activeTab === "balances"
-                ? "Everyone is completely squared up. No outstanding balances found."
-                : "Share the invite code above to get your roommates added to this group."}
-            </Text>
-          </View>
+          activeTab !== "analytics" ? (
+            <View className="py-12 items-center justify-center px-4 bg-[#151E2E] rounded-2xl border-[0.5px] border-white/5 shadow-md">
+              <AlertCircle size={28} color="#94A3B8" className="mb-2" />
+              <Text className="text-white text-base font-bold text-center mb-1">
+                {activeTab === "expenses"
+                  ? "No expenses yet"
+                  : activeTab === "balances"
+                  ? "All settled up!"
+                  : activeTab === "activity"
+                  ? "No activity logs"
+                  : "No members"}
+              </Text>
+              <Text className="text-[#94A3B8] text-xs text-center leading-relaxed">
+                {activeTab === "expenses"
+                  ? "Tap the '+' button below to log your first shared expense."
+                  : activeTab === "balances"
+                  ? "Excellent work! Everyone in the group is squared away."
+                  : activeTab === "activity"
+                  ? "Your transaction actions timeline will populate here."
+                  : "Invite friends using the invite code above to split expenses."}
+              </Text>
+            </View>
+          ) : null
         }
       />
 
-      {/* Floating Action Button (FAB) to Add Expense */}
-      <TouchableOpacity
-        onPress={() => {
-          Theme.haptics.light();
-          router.push({
-            pathname: "/groups/add-expense",
-            params: { groupId: id },
-          });
-        }}
-        className="absolute bottom-6 right-6 w-14 h-14 rounded-full bg-accentCyan justify-center items-center shadow-lg active:scale-95 z-40"
-      >
-        <Plus size={24} color="#0D0D0D" />
-      </TouchableOpacity>
+      {/* Floating Action Button (Only on Expenses Tab) */}
+      {activeTab === "expenses" && (
+        <TouchableOpacity
+          onPress={() => {
+            Theme.haptics.light();
+            router.push({
+              pathname: "/groups/add-expense",
+              params: { groupId: id },
+            });
+          }}
+          style={{
+            position: "absolute",
+            bottom: 24,
+            right: 24,
+            shadowColor: "#14E5D4",
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.3,
+            shadowRadius: 10,
+            elevation: 8,
+          }}
+          className="w-14 h-14 bg-[#14E5D4] rounded-full justify-center items-center active:scale-95 z-40"
+        >
+          <Plus size={28} color="#0B1220" />
+        </TouchableOpacity>
+      )}
 
-      {/* GROUP SETTINGS / LEAVE SHEET */}
+      {/* Settings Modal */}
       <Modal visible={isSettingsOpen} animationType="slide" transparent>
         <View className="flex-1 justify-end bg-black/60">
-          <View className="bg-surface border-t-[0.5px] border-border rounded-t-3xl p-6 pb-10">
+          <View className="bg-[#151E2E] border-t-[0.5px] border-white/10 rounded-t-3xl p-6 pb-10">
             <View className="flex-row justify-between items-center mb-6">
               <Text className="text-xl font-bold text-white">Group Settings</Text>
               <TouchableOpacity
                 onPress={() => setIsSettingsOpen(false)}
-                className="w-8 h-8 justify-center items-center rounded-full bg-surfaceLight"
+                className="w-8 h-8 justify-center items-center rounded-full bg-white/5"
               >
-                <X size={16} color="#A3A3A3" />
+                <X size={16} color="#94A3B8" />
               </TouchableOpacity>
             </View>
 
-            {isAdmin ? (
-              // Edit Details View (Admin Only)
-              <View className="space-y-4">
-                <View>
-                  <Text className="text-accentGray text-xs font-bold uppercase tracking-widest mb-2">
-                    Rename Group
-                  </Text>
-                  <Controller
-                    control={control}
-                    name="name"
-                    render={({ field: { onChange, onBlur, value } }) => (
-                      <TextInput
-                        className="bg-surfaceLight border-[0.5px] border-border text-white px-4 py-3 rounded-xl"
-                        onBlur={onBlur}
-                        onChangeText={onChange}
-                        value={value}
-                      />
-                    )}
-                  />
-                  {errors.name && (
-                    <Text className="text-accentPink text-xs mt-1">{errors.name.message}</Text>
+            <View className="space-y-4">
+              <View>
+                <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-2">Group Name</Text>
+                <Controller
+                  control={control}
+                  name="name"
+                  render={({ field: { onChange, onBlur, value } }) => (
+                    <TextInput
+                      className="bg-white/5 border-[0.5px] border-white/10 text-white px-4 py-3 rounded-xl text-sm"
+                      placeholder="Group Name"
+                      placeholderTextColor="#94A3B8"
+                      onBlur={onBlur}
+                      onChangeText={onChange}
+                      value={value}
+                    />
                   )}
-                </View>
-
-                <View>
-                  <Text className="text-accentGray text-xs font-bold uppercase tracking-widest mb-2">
-                    Edit Description
-                  </Text>
-                  <Controller
-                    control={control}
-                    name="description"
-                    render={({ field: { onChange, onBlur, value } }) => (
-                      <TextInput
-                        className="bg-surfaceLight border-[0.5px] border-border text-white px-4 py-3 rounded-xl"
-                        onBlur={onBlur}
-                        onChangeText={onChange}
-                        value={value}
-                      />
-                    )}
-                  />
-                  {errors.description && (
-                    <Text className="text-accentPink text-xs mt-1">
-                      {errors.description.message}
-                    </Text>
-                  )}
-                </View>
-
-                {/* Save Edit Button */}
-                <TouchableOpacity
-                  onPress={handleSubmit((data) => updateMutation.mutate(data))}
-                  disabled={updateMutation.isPending}
-                  className="flex-row bg-accentCyan py-4 rounded-xl justify-center items-center active:opacity-90 mt-4"
-                >
-                  {updateMutation.isPending ? (
-                    <ActivityIndicator size="small" color="#0D0D0D" />
-                  ) : (
-                    <>
-                      <Save size={18} color="#0D0D0D" />
-                      <Text className="text-background font-black text-base ml-2">
-                        Save Settings
-                      </Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-
-                {/* Delete Group Button (Admin only) */}
-                <TouchableOpacity
-                  onPress={handleDeleteGroup}
-                  disabled={isDeleting}
-                  className="flex-row border-[0.5px] border-accentPink py-4 rounded-xl justify-center items-center active:opacity-85 mt-2"
-                >
-                  {isDeleting ? (
-                    <ActivityIndicator size="small" color="#FF007F" />
-                  ) : (
-                    <>
-                      <Trash2 size={18} color="#FF007F" />
-                      <Text className="text-accentPink font-bold text-base ml-2">Delete Group</Text>
-                    </>
-                  )}
-                </TouchableOpacity>
+                />
+                {errors.name && <Text className="text-[#EF4444] text-xs mt-1">{errors.name.message}</Text>}
               </View>
-            ) : (
-              // Non-Admin Leave View
-              <View className="space-y-4">
-                <Text className="text-accentGray text-sm leading-relaxed mb-6">
-                  You are a member of this group. You can leave the group below. Note that this will remove you from all ledger splits.
-                </Text>
+
+              <View className="mt-4">
+                <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-2">Description (Optional)</Text>
+                <Controller
+                  control={control}
+                  name="description"
+                  render={({ field: { onChange, onBlur, value } }) => (
+                    <TextInput
+                      className="bg-white/5 border-[0.5px] border-white/10 text-white px-4 py-3 rounded-xl text-sm"
+                      placeholder="Description"
+                      placeholderTextColor="#94A3B8"
+                      onBlur={onBlur}
+                      onChangeText={onChange}
+                      value={value}
+                    />
+                  )}
+                />
+              </View>
+
+              <TouchableOpacity
+                onPress={handleSubmit((data) => updateMutation.mutate(data))}
+                disabled={updateMutation.isPending}
+                className="bg-[#14E5D4] py-3 rounded-xl items-center mt-6 active:opacity-90 shadow-md shadow-[#14E5D4]/20"
+              >
+                <Text className="text-[#0B1220] font-black text-sm">Save Changes</Text>
+              </TouchableOpacity>
+
+              <View className="flex-row space-x-2 mt-4">
                 <TouchableOpacity
                   onPress={handleLeaveGroup}
                   disabled={isLeaving}
-                  className="flex-row border-[0.5px] border-accentPink py-4 rounded-xl justify-center items-center active:opacity-85"
+                  className="flex-1 flex-row bg-white/5 border-[0.5px] border-white/10 py-3 rounded-xl items-center justify-center active:opacity-85 mr-2"
                 >
-                  {isLeaving ? (
-                    <ActivityIndicator size="small" color="#FF007F" />
-                  ) : (
-                    <>
-                      <LogOut size={18} color="#FF007F" />
-                      <Text className="text-accentPink font-bold text-base ml-2">Leave Group</Text>
-                    </>
-                  )}
+                  <LogOut size={16} color="#EF4444" className="mr-2" />
+                  <Text className="text-[#EF4444] font-bold text-xs">Leave Group</Text>
                 </TouchableOpacity>
+
+                {group.created_by === user?.id && (
+                  <TouchableOpacity
+                    onPress={handleDeleteGroup}
+                    disabled={isDeleting}
+                    className="flex-1 flex-row bg-[#EF4444]/10 border-[0.5px] border-[#EF4444]/30 py-3 rounded-xl items-center justify-center active:opacity-85"
+                  >
+                    <Trash2 size={16} color="#EF4444" className="mr-2" />
+                    <Text className="text-[#EF4444] font-bold text-xs">Delete Group</Text>
+                  </TouchableOpacity>
+                )}
               </View>
-            )}
+            </View>
+          </View>
+        </View>
+      </Modal>
+      {/* SETTLE UP MODAL */}
+      <Modal visible={isSettleModalOpen} animationType="slide" transparent>
+        <View className="flex-1 justify-end bg-black/60">
+          <View className="bg-[#151E2E] border-t-[0.5px] border-white/10 rounded-t-3xl p-6 pb-10">
+            <View className="flex-row justify-between items-center mb-6">
+              <Text className="text-xl font-bold text-white">Record Settlement</Text>
+              <TouchableOpacity
+                onPress={() => setIsSettleModalOpen(false)}
+                className="w-8 h-8 justify-center items-center rounded-full bg-white/5"
+              >
+                <X size={16} color="#94A3B8" />
+              </TouchableOpacity>
+            </View>
+
+            <View className="space-y-4">
+              {/* From / To summary */}
+              {(() => {
+                const fromProfile = members?.find((m: any) => m.profile.id === settlementFrom)?.profile;
+                const toProfile = members?.find((m: any) => m.profile.id === settlementTo)?.profile;
+                return (
+                  <View className="bg-white/5 border border-white/10 rounded-xl p-3.5 space-y-2">
+                    <View className="flex-row justify-between items-center">
+                      <Text className="text-[#94A3B8] text-xs">Payer (From):</Text>
+                      <Text className="text-white text-xs font-bold">
+                        {fromProfile?.username ? `@${fromProfile.username}` : fromProfile?.display_name || "Someone"}
+                      </Text>
+                    </View>
+                    <View className="flex-row justify-between items-center pt-2 border-t border-white/5">
+                      <Text className="text-[#94A3B8] text-xs">Receiver (To):</Text>
+                      <Text className="text-white text-xs font-bold">
+                        {toProfile?.username ? `@${toProfile.username}` : toProfile?.display_name || "Someone"}
+                      </Text>
+                    </View>
+                    <View className="flex-row justify-between items-center pt-2 border-t border-white/5">
+                      <Text className="text-[#94A3B8] text-xs">Outstanding balance:</Text>
+                      <Text className="text-[#14E5D4] text-xs font-black">
+                        ₹ {settlementOutstanding.toFixed(2)}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })()}
+              {/* Amount */}
+              <View>
+                <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-2">
+                  Settlement Amount (₹)
+                </Text>
+                <View className="flex-row items-center bg-white/5 border-[0.5px] border-white/10 rounded-xl px-4 py-3">
+                  <Text className="text-[#14E5D4] font-black text-lg mr-2">₹</Text>
+                  <TextInput
+                    className="flex-1 text-white text-lg font-bold py-1"
+                    placeholder="0.00"
+                    placeholderTextColor="#666666"
+                    keyboardType="numeric"
+                    value={settlementAmount}
+                    onChangeText={setSettlementAmount}
+                  />
+                </View>
+              </View>
+
+              {/* Date */}
+              <View className="mt-4">
+                <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-2">
+                  Payment Date (YYYY-MM-DD)
+                </Text>
+                <TextInput
+                  className="bg-white/5 border-[0.5px] border-white/10 text-white px-4 py-3 rounded-xl text-sm"
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor="#94A3B8"
+                  value={settlementDate}
+                  onChangeText={setSettlementDate}
+                />
+              </View>
+
+              {/* Notes */}
+              <View className="mt-4">
+                <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-2">
+                  Notes (Optional)
+                </Text>
+                <TextInput
+                  className="bg-white/5 border-[0.5px] border-white/10 text-white px-4 py-3 rounded-xl text-sm"
+                  placeholder="e.g. Paid via GPay, Cash"
+                  placeholderTextColor="#94A3B8"
+                  value={settlementNotes}
+                  onChangeText={setSettlementNotes}
+                />
+              </View>
+
+              <TouchableOpacity
+                onPress={() => {
+                  const amt = Number(settlementAmount);
+                  if (isNaN(amt) || amt <= 0) {
+                    showToast("Please enter a valid positive amount", "error");
+                    return;
+                  }
+                  if (amt > settlementOutstanding + 0.01) {
+                    showToast(`Amount cannot exceed the outstanding balance of ₹${settlementOutstanding.toFixed(0)}`, "error");
+                    return;
+                  }
+                  settleMutation.mutate({
+                    from: settlementFrom,
+                    to: settlementTo,
+                    amount: amt,
+                    notes: settlementNotes.trim(),
+                    date: settlementDate,
+                  });
+                }}
+                disabled={settleMutation.isPending}
+                className="bg-[#14E5D4] py-4 rounded-xl items-center mt-6 active:opacity-90 shadow-md shadow-[#14E5D4]/20"
+              >
+                {settleMutation.isPending ? (
+                  <ActivityIndicator size="small" color="#0B1220" />
+                ) : (
+                  <Text className="text-[#0B1220] font-black text-base">Confirm Settlement</Text>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>

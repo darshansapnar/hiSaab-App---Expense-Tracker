@@ -2,8 +2,13 @@ import React from "react";
 import { Tabs } from "expo-router";
 import { Home, User, Users, BarChart2 } from "lucide-react-native";
 import { Colors } from "../../../constants/Colors";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function TabLayout() {
+  const insets = useSafeAreaInsets();
+  const tabHeight = 60 + insets.bottom;
+  const paddingBottom = insets.bottom > 0 ? insets.bottom + 4 : 8;
+
   return (
     <Tabs
       screenOptions={{
@@ -12,8 +17,8 @@ export default function TabLayout() {
           backgroundColor: "#161616", // Carbon container surface color
           borderTopWidth: 0.5,
           borderTopColor: "#262626",  // Subtle border separator
-          height: 60,
-          paddingBottom: 8,
+          height: tabHeight,
+          paddingBottom: paddingBottom,
           paddingTop: 8,
         },
         tabBarActiveTintColor: Colors.accentCyan,

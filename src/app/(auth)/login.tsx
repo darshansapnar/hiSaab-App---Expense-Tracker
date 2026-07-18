@@ -49,7 +49,8 @@ export default function Login() {
       } else {
         Theme.haptics.success();
         showToast("Welcome to Hisab", "success");
-        // useAuth listener will automatically handle routing redirect to (app)
+        // Navigate back to index so the auth guard re-evaluates and redirects
+        router.replace("/");
       }
     } catch (e) {
       showToast("An unexpected error occurred", "error");

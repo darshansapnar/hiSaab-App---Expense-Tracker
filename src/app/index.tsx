@@ -17,8 +17,8 @@ export default function Index() {
   }
 
   if (session) {
-    // Force onboarding profile setup if user lacks a display name
-    if (!profile?.display_name) {
+    // Force onboarding if username/onboarding not completed
+    if (!profile?.onboarding_completed) {
       return <Redirect href="/(auth)/profile-setup" />;
     }
     return <Redirect href="/(app)/(tabs)" />;
@@ -26,4 +26,3 @@ export default function Index() {
 
   return <Redirect href="/(auth)/login" />;
 }
-

@@ -16,12 +16,17 @@ Notifications.setNotificationHandler({
 
 /**
  * Registers the device for Expo Push Notifications and saves the token to the user profile.
- * 
+ *
  * @param userId Active authenticated user ID
  * @returns Registered push token string, or null
  */
 export async function registerForPushNotificationsAsync(userId: string): Promise<string | null> {
   let token: string | null = null;
+
+  // Skip push registration on web platform
+  if (Platform.OS === "web") {
+    return null;
+  }
 
   if (Platform.OS === "android") {
     await Notifications.setNotificationChannelAsync("default", {
@@ -74,12 +79,21 @@ export async function registerForPushNotificationsAsync(userId: string): Promise
  * Sends a local notification alert immediately.
  */
 export async function triggerLocalNotification(title: string, body: string, data?: any) {
-  await Notifications.scheduleNotificationAsync({
-    content: {
-      title,
-      body,
-      data: data || {},
-    },
-    trigger: null, // deliver immediately
-  });
+  // Skip on web
+  if (Platform.OS === "web") {
+    return;
+  }
+
+  try {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title,
+        body,
+        data: data || {},
+      },
+      trigger: { type: 'timeInterval', seconds: 1 } as any,
+    });
+  } catch (e) {
+    console.warn("Failed to schedule local notification:", e);
+  }
 }
