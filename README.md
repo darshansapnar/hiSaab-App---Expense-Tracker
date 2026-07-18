@@ -1,56 +1,114 @@
-# Welcome to your Expo app 👋
+# Hisab — Shared Finance Platform
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+> "No more 'Bhai, kitna dena hai?'"
 
-## Get started
+Hisab is a modern, premium, and lightning-fast shared finance mobile application tailored for hostel students, flatmates, friends, families, couples, and travel groups. 
 
-1. Install dependencies
+Unlike generic expense splitters, Hisab is built specifically for the everyday shared living experience. It seamlessly manages both one-off group expenses (like trips or dinners) and recurring daily utilities (like water jars, tiffin subscriptions, and shared grocery lists).
 
-   ```bash
-   npm install
-   ```
+---
 
-2. Start the app
+## 🚀 Key Features
 
-   ```bash
-   npx expo start
-   ```
+*   **Group Expense Splitting:** Flexible splitting methods (equal, percentage, exact shares, adjustment amounts) with instant balance recalculations.
+*   **Everyday Trackers:** 
+    *   **Water Jar Tracker:** Record deliveries with a single tap; automatically logs who consumed and calculates splits.
+    *   **Tiffin Tracker:** Track meal subscriptions, skip days, and divide costs transparently.
+    *   **Shared Groceries:** Real-time checklist that syncs purchases and automatically updates balances.
+*   **Monthly Budgets:** Visual budget bars with custom notification thresholds (e.g., alert at 80% spending limit).
+*   **Visual Analytics:** Spend tracking breakdown, category breakdowns, and historical trends powered by Victory Native XL.
+*   **Offline-First Architecture:** Log expenses anywhere, anytime. Transactions are queued locally and automatically synced once a network connection is detected.
+*   **Premium Aesthetics:** A high-contrast dark mode palette, smooth micro-animations, and tactile haptic feedback inspired by CRED, Spotify, Notion, and Linear.
 
-In the output, you'll find options to open the app in a
+---
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+## 🛠️ Technology Stack
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+### Frontend
+*   **Framework:** React Native (via **Expo SDK** managed workflow)
+*   **Navigation:** **Expo Router** (file-system based routing)
+*   **Language:** **TypeScript** (Strict Mode)
+*   **Styling:** **NativeWind v4** (Tailwind CSS for React Native)
+*   **State Management:** **Zustand** (with persistence for offline sync)
+*   **Data Fetching & Cache:** **TanStack Query** (React Query)
+*   **Data Visualization:** **Victory Native XL**
 
-## Get a fresh project
+### Backend & Services
+*   **Backend:** **Supabase**
+*   **Database:** PostgreSQL (with Row Level Security and triggers)
+*   **Realtime:** Supabase Realtime (for live grocery lists and instant balance updates)
+*   **Authentication:** Supabase Auth (Email OTP, Magic Links, and Password)
+*   **Storage:** Supabase Storage (for receipt images)
+*   **Edge Functions:** Supabase Edge Functions (for math settlement calculations and AI insights)
 
-When you're ready, run:
+---
 
-```bash
-npm run reset-project
+## 📂 Folder Structure
+
+The project follows a **Feature-First Architecture** to ensure high cohesion, low coupling, and easy maintainability as features scale.
+
+```
+src/
+├── app/                    # Expo Router route definitions and layout files
+│   ├── (auth)/             # Authentication screen routes
+│   └── (app)/              # Main app routes (Dashboard, Groups, Trackers, Profile)
+├── components/             # Reusable global UI widgets & atomic elements
+│   └── ui/                 # Design System primitives (Buttons, Inputs, Cards, Sheets)
+├── constants/              # Style guidelines, theme definitions, colors, and layout variables
+├── hooks/                  # Global hooks (network state, haptics, auth status)
+├── services/               # Core service integrations (Supabase client config)
+│   └── api/                # Database API wrappers & queries
+├── store/                  # Zustand stores (Auth, Sync Queue, Theme)
+├── types/                  # Shared TypeScript interfaces & types
+└── utils/                  # Math formulas, currency formatters, date helpers
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+---
 
-### Other setup steps
+## ⚙️ Installation & Running Locally
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+### Prerequisites
+*   Node.js (v18 or higher)
+*   npm or Bun
+*   Expo Go app installed on your physical device (iOS/Android) or an emulator configured
 
-## Learn more
+### Setup Steps
+1.  **Clone the Repository:**
+    ```bash
+    git clone https://github.com/your-username/hisab-app.git
+    cd hisab-app
+    ```
 
-To learn more about developing your project with Expo, look at the following resources:
+2.  **Install Dependencies:**
+    ```bash
+    npm install
+    ```
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+3.  **Environment Variables:**
+    Create a `.env` file in the root directory:
+    ```env
+    EXPO_PUBLIC_SUPABASE_URL=https://your-supabase-project.supabase.co
+    EXPO_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
+    ```
 
-## Join the community
+4.  **Start the Expo Server:**
+    ```bash
+    npx expo start
+    ```
 
-Join our community of developers creating universal apps.
+5.  **Run the App:**
+    *   Scan the QR code displayed in the terminal with your phone's camera (iOS) or the Expo Go app (Android).
+    *   Press `a` for Android Emulator or `i` for iOS Simulator.
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+---
+
+## 🔒 Security & Performance
+
+*   **Row Level Security (RLS):** Enabled on all Supabase PostgreSQL tables. Users can only access data belonging to groups of which they are active members.
+*   **Optimistic Updates:** Frontend UI updates immediately on user input (e.g., logging an expense) while background sync guarantees database consistency.
+*   **Strict Math:** Currency calculations are stored in PostgreSQL as `decimal(12,2)` to prevent floating-point calculation anomalies.
+
+---
+
+## 📄 License
+This project is licensed under the MIT License - see the LICENSE file for details.
