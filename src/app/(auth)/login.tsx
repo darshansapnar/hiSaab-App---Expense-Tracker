@@ -69,6 +69,7 @@ export default function Login() {
     setIsGoogleSubmitting(true);
     try {
       const redirectUrl = Linking.createURL("google-auth");
+      console.log("[Google Auth] Generated Redirect URL:", redirectUrl);
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
