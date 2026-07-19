@@ -38,6 +38,7 @@ export function useAuth() {
           event === "USER_UPDATED" ||
           event === "TOKEN_REFRESHED"
         ) {
+          setLoading(true);
           await fetchProfile(session.user.id);
         }
       } else {

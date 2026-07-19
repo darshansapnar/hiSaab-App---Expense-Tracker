@@ -223,7 +223,8 @@ export default function ProfileSetup() {
           title: "Welcome Message 🎉",
           description: "Welcome to hiSaab! Let's keep the hisaab clear and your finances clean. 🤝",
         });
-        // Auth gate in index.tsx will detect onboarding_completed and redirect to app
+        // Transition directly to the main app dashboard
+        router.replace("/(app)/(tabs)");
       }
     } catch (e) {
       showToast("An unexpected error occurred", "error");
