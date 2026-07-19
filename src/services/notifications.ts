@@ -38,11 +38,11 @@ export async function registerForPushNotificationsAsync(userId: string): Promise
   }
 
   if (Device.isDevice) {
-    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    const { status: existingStatus } = (await Notifications.getPermissionsAsync()) as any;
     let finalStatus = existingStatus;
 
     if (existingStatus !== "granted") {
-      const { status } = await Notifications.requestPermissionsAsync();
+      const { status } = (await Notifications.requestPermissionsAsync()) as any;
       finalStatus = status;
     }
 
@@ -91,7 +91,7 @@ export async function triggerLocalNotification(title: string, body: string, data
         body,
         data: data || {},
       },
-      trigger: { type: 'timeInterval', seconds: 1 } as any,
+      trigger: { type: "timeInterval", seconds: 1 } as any,
     });
   } catch (e) {
     console.warn("Failed to schedule local notification:", e);

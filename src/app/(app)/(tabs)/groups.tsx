@@ -78,7 +78,9 @@ export default function Groups() {
   const [joinCode, setJoinCode] = useState("");
   const [isJoining, setIsJoining] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [createdGroup, setCreatedGroup] = useState<{ name: string; invite_code: string } | null>(null);
+  const [createdGroup, setCreatedGroup] = useState<{ name: string; invite_code: string } | null>(
+    null
+  );
 
   // Ellipsis menu states
   const [selectedGroupForMenu, setSelectedGroupForMenu] = useState<any | null>(null);
@@ -103,11 +105,13 @@ export default function Groups() {
 
       const { data: groupsData, error: groupsErr } = await supabase
         .from("groups")
-        .select(`
+        .select(
+          `
           *,
           group_members(profile_id, role),
           expenses(description, amount, expense_date, is_settlement, payer:profiles(username, display_name))
-        `)
+        `
+        )
         .in("id", groupIds);
 
       if (groupsErr) throw groupsErr;
@@ -167,20 +171,8 @@ export default function Groups() {
         throw new Error("Couldn't create the group. Please try again.");
       }
 
-      // Parse the RPC response to get the group ID
-      const parsed = typeof newGroup === 'string' ? JSON.parse(newGroup) : newGroup;
-      const groupId = parsed?.id;
-
-      if (groupId) {
-        // Fetch the group with invite_code from the database directly
-        const { data: freshGroup } = await supabase
-          .from("groups")
-          .select("id, name, invite_code")
-          .eq("id", groupId)
-          .single();
-        return freshGroup;
-      }
-
+      // Parse the RPC response to get the group
+      const parsed = typeof newGroup === "string" ? JSON.parse(newGroup) : newGroup;
       return parsed;
     },
     onSuccess: (data: any) => {
@@ -244,7 +236,7 @@ export default function Groups() {
       }
 
       Theme.haptics.success();
-      const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+      const parsed = typeof data === "string" ? JSON.parse(data) : data;
       showToast(`Welcome to ${parsed?.group_name || "the group"}!`, "success");
       triggerWittyNotification("member_joined", "New Group Member");
       queryClient.invalidateQueries({ queryKey: ["groups", user?.id] });
@@ -255,6 +247,18 @@ export default function Groups() {
       showToast(e.message || "Failed to join group", "error");
     } finally {
       setIsJoining(false);
+    }
+  };
+
+  const handleShareInvite = async (group: any) => {
+    Theme.haptics.light();
+    const code = group.invite_code || group.id;
+    try {
+      await Share.share({
+        message: `Join my hiSaab group!\n\nGroup: ${group.name}\nInvite Code: ${code}\n\nOpen hiSaab → Groups → Join Group and enter this code.\n\nKeep the hisaab clear. 🤝`,
+      });
+    } catch (e: any) {
+      showToast("Could not open share menu", "error");
     }
   };
 
@@ -285,7 +289,9 @@ export default function Groups() {
     if (latest.is_settlement) {
       return `Settled ₹${Number(latest.amount).toFixed(0)}`;
     }
-    const payerName = latest.payer?.username ? `@${latest.payer.username}` : latest.payer?.display_name || "Someone";
+    const payerName = latest.payer?.username
+      ? `@${latest.payer.username}`
+      : latest.payer?.display_name || "Someone";
     return `${payerName} added "${latest.description}"`;
   };
 
@@ -341,7 +347,9 @@ export default function Groups() {
         {/* Top Row: Avatar, Name, Type badge, Ellipsis menu */}
         <View className="flex-row justify-between items-center mb-3">
           <View className="flex-row items-center flex-1 mr-2">
-            <View className={`w-12 h-12 justify-center items-center rounded-full border-[0.5px] ${avatar.bgClass}`}>
+            <View
+              className={`w-12 h-12 justify-center items-center rounded-full border-[0.5px] ${avatar.bgClass}`}
+            >
               <Text className={`text-lg font-black ${avatar.textClass}`}>{avatar.letter}</Text>
             </View>
             <View className="ml-3 flex-1">
@@ -416,7 +424,19 @@ export default function Groups() {
               <Text className="text-[#94A3B8] text-xs font-bold">✓ Settled</Text>
             )}
           </View>
-          <ChevronRight size={16} color={Colors.accentCyan} />
+          <View className="flex-row items-center gap-3">
+            <TouchableOpacity
+              onPress={(e) => {
+                e.stopPropagation(); // prevent opening group details
+                handleShareInvite(item);
+              }}
+              className="flex-row items-center bg-accentCyan/10 border border-accentCyan/20 px-3 py-1.5 rounded-lg active:scale-95"
+            >
+              <Users2 size={12} color="#14E5D4" />
+              <Text className="text-accentCyan text-[11px] font-black ml-1.5">Invite</Text>
+            </TouchableOpacity>
+            <ChevronRight size={16} color={Colors.accentCyan} />
+          </View>
         </View>
       </TouchableOpacity>
     );
@@ -487,9 +507,7 @@ export default function Groups() {
                 <Text className="text-[#94A3B8] text-[10px] font-bold uppercase tracking-wider">
                   To Pay
                 </Text>
-                <Text className="text-white text-lg font-black mt-1">
-                  ₹{globalOwes.toFixed(0)}
-                </Text>
+                <Text className="text-white text-lg font-black mt-1">₹{globalOwes.toFixed(0)}</Text>
               </View>
               <ArrowUpRight size={20} color="#EF4444" />
             </View>
@@ -612,10 +630,27 @@ export default function Groups() {
                   Theme.haptics.light();
                   try {
                     const code = selectedGroupForMenu.invite_code || selectedGroupForMenu.id;
+                    await Clipboard.setStringAsync(code);
+                    showToast("Invite code copied to clipboard!", "success");
+                  } catch (e: any) {
+                    showToast("Failed to copy code", "error");
+                  }
+                  setSelectedGroupForMenu(null);
+                }}
+                className="flex-row items-center py-3.5 border-b border-white/5 px-2 active:opacity-75"
+              >
+                <Copy size={16} color="#94A3B8" className="mr-3" />
+                <Text className="text-[#94A3B8] font-semibold text-sm">Copy Code</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={async () => {
+                  Theme.haptics.light();
+                  try {
+                    const code = selectedGroupForMenu.invite_code || selectedGroupForMenu.id;
                     const name = selectedGroupForMenu.name;
                     await Share.share({
-                      title: `Join ${name} on hiSaab`,
-                      message: `Join my hiSaab group!\n\nGroup:\n${name}\n\nInvite Code:\n${code}\n\nSee you inside 👋`,
+                      message: `Join my hiSaab group!\n\nGroup: ${name}\nInvite Code: ${code}\n\nOpen hiSaab → Groups → Join Group and enter this code.\n\nKeep the hisaab clear. 🤝`,
                     });
                   } catch (e: any) {
                     showToast("Failed to share", "error");
@@ -625,7 +660,7 @@ export default function Groups() {
                 className="flex-row items-center py-3.5 border-b border-white/5 px-2 active:opacity-75"
               >
                 <Share2 size={16} color="#94A3B8" className="mr-3" />
-                <Text className="text-[#94A3B8] font-semibold text-sm">Share Invite Link</Text>
+                <Text className="text-[#94A3B8] font-semibold text-sm">Share Invite</Text>
               </TouchableOpacity>
 
               {/* Delete Group (Owner only check) */}
@@ -884,8 +919,7 @@ export default function Groups() {
                   Theme.haptics.light();
                   try {
                     await Share.share({
-                      title: `Join ${createdGroup?.name} on hiSaab`,
-                      message: `Join my hiSaab group!\n\nGroup:\n${createdGroup?.name}\n\nInvite Code:\n${createdGroup?.invite_code}\n\nSee you inside 👋`,
+                      message: `Join my hiSaab group!\n\nGroup: ${createdGroup?.name}\nInvite Code: ${createdGroup?.invite_code}\n\nOpen hiSaab → Groups → Join Group and enter this code.`,
                     });
                   } catch {}
                 }}

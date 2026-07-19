@@ -134,10 +134,12 @@ export default function Dashboard() {
 
       const { data: groupsData, error: groupsErr } = await supabase
         .from("groups")
-        .select(`
+        .select(
+          `
           *,
           group_members(profile_id, role)
-        `)
+        `
+        )
         .in("id", groupIds)
         .order("created_at", { ascending: false })
         .limit(3);
@@ -306,41 +308,35 @@ export default function Dashboard() {
     setIsJoining(true);
 
     try {
-      const cleanCode = joinCode.trim();
+      const { data, error } = await supabase.rpc("join_group_by_invite_code", {
+        p_invite_code: joinCode.trim().toUpperCase(),
+        p_user_id: user?.id,
+      });
 
-      const { data: group, error: groupError } = await supabase
-        .from("groups")
-        .select("*")
-        .eq("id", cleanCode)
-        .single();
-
-      if (groupError || !group) {
+      if (error) {
         Theme.haptics.error();
-        showToast("Invalid invite code. Group not found.", "error");
-        setIsJoining(false);
+        const msg = error.message || "";
+        if (msg.includes("not found")) {
+          showToast("Invite code not found.", "error");
+        } else if (msg.includes("already")) {
+          showToast("You're already in this group.", "info");
+        } else {
+          showToast(msg || "Failed to join group", "error");
+        }
         return;
       }
 
-      const { error: joinError } = await supabase.from("group_members").insert({
-        group_id: cleanCode,
-        profile_id: user?.id,
-        role: "member",
-      });
-
-      if (joinError) {
-        if (joinError.code === "23505") {
-          showToast("You are already a member of this group", "info");
-        } else {
-          throw joinError;
-        }
-      } else {
-        Theme.haptics.success();
-        triggerWittyNotification("member_joined", "New Group Member");
-        queryClient.invalidateQueries({ queryKey: ["dashboard-groups-latest", user?.id] });
-      }
-
+      Theme.haptics.success();
+      const parsed = typeof data === "string" ? JSON.parse(data) : data;
+      showToast(`Welcome to ${parsed?.group_name || "the group"}!`, "success");
+      triggerWittyNotification("member_joined", "New Group Member");
+      queryClient.invalidateQueries({ queryKey: ["dashboard-groups-latest", user?.id] });
+      queryClient.invalidateQueries({ queryKey: ["groups", user?.id] });
       setIsJoinOpen(false);
       setJoinCode("");
+      if (parsed?.group_id) {
+        router.push(`/groups/${parsed.group_id}`);
+      }
     } catch (e: any) {
       Theme.haptics.error();
       showToast(e.message || "Failed to join group", "error");
@@ -412,16 +408,16 @@ export default function Dashboard() {
       try {
         const todayStr = new Date().toISOString().split("T")[0];
         const lastReminderDate = await AsyncStorage.getItem("last_daily_reminder_date");
-        
+
         if (lastReminderDate !== todayStr) {
           const startOfToday = new Date();
           startOfToday.setHours(0, 0, 0, 0);
-          
+
           const todayExpenses = (personalExpenses || []).filter((e: any) => {
             const expDate = new Date(e.expense_date);
             return expDate >= startOfToday;
           });
-          
+
           if (todayExpenses.length === 0) {
             await triggerWittyNotification("daily_reminder", "hiSaab Reminder");
             await AsyncStorage.setItem("last_daily_reminder_date", todayStr);
@@ -431,7 +427,7 @@ export default function Dashboard() {
         // Ignore
       }
     };
-    
+
     if (personalExpenses) {
       checkDailyReminder();
     }
@@ -530,11 +526,36 @@ export default function Dashboard() {
 
   const getCategoryIcon = (categoryName: string) => {
     const name = categoryName.toLowerCase();
-    if (name.includes("food") || name.includes("eat") || name.includes("restaurant") || name.includes("cafe")) return "🍕";
+    if (
+      name.includes("food") ||
+      name.includes("eat") ||
+      name.includes("restaurant") ||
+      name.includes("cafe")
+    )
+      return "🍕";
     if (name.includes("shopping") || name.includes("cloth") || name.includes("grocer")) return "🛒";
-    if (name.includes("rent") || name.includes("bill") || name.includes("flat") || name.includes("home")) return "🏠";
-    if (name.includes("travel") || name.includes("cab") || name.includes("fuel") || name.includes("bus") || name.includes("auto")) return "🚗";
-    if (name.includes("drink") || name.includes("party") || name.includes("club") || name.includes("fun")) return "🍺";
+    if (
+      name.includes("rent") ||
+      name.includes("bill") ||
+      name.includes("flat") ||
+      name.includes("home")
+    )
+      return "🏠";
+    if (
+      name.includes("travel") ||
+      name.includes("cab") ||
+      name.includes("fuel") ||
+      name.includes("bus") ||
+      name.includes("auto")
+    )
+      return "🚗";
+    if (
+      name.includes("drink") ||
+      name.includes("party") ||
+      name.includes("club") ||
+      name.includes("fun")
+    )
+      return "🍺";
     return "💸";
   };
 
@@ -604,7 +625,9 @@ export default function Dashboard() {
               }}
               numberOfLines={1}
             >
-              Hi, {profile?.username ? `@${profile.username}` : profile?.display_name || "hiSaab User"} 👋
+              Hi,{" "}
+              {profile?.username ? `@${profile.username}` : profile?.display_name || "hiSaab User"}{" "}
+              👋
             </Text>
             <Text
               style={{
@@ -696,7 +719,14 @@ export default function Dashboard() {
               <View className="w-8 h-8 rounded-lg bg-accentCyan/10 justify-center items-center mb-2.5">
                 <Wallet size={16} color={Colors.accentCyan} />
               </View>
-              <Text style={{ color: "#94A3B8", fontSize: 10, fontWeight: "700", textTransform: "uppercase" }}>
+              <Text
+                style={{
+                  color: "#94A3B8",
+                  fontSize: 10,
+                  fontWeight: "700",
+                  textTransform: "uppercase",
+                }}
+              >
                 This Month
               </Text>
               <Text style={{ color: "#FFFFFF", fontSize: 18, fontWeight: "900", marginTop: 2 }}>
@@ -719,7 +749,14 @@ export default function Dashboard() {
               <View className="w-8 h-8 rounded-lg bg-[#EF4444]/10 justify-center items-center mb-2.5">
                 <ArrowUpRight size={16} color="#EF4444" />
               </View>
-              <Text style={{ color: "#94A3B8", fontSize: 10, fontWeight: "700", textTransform: "uppercase" }}>
+              <Text
+                style={{
+                  color: "#94A3B8",
+                  fontSize: 10,
+                  fontWeight: "700",
+                  textTransform: "uppercase",
+                }}
+              >
                 To Pay
               </Text>
               <Text style={{ color: "#FFFFFF", fontSize: 18, fontWeight: "900", marginTop: 2 }}>
@@ -742,7 +779,14 @@ export default function Dashboard() {
               <View className="w-8 h-8 rounded-lg bg-[#22C55E]/10 justify-center items-center mb-2.5">
                 <ArrowDownLeft size={16} color="#22C55E" />
               </View>
-              <Text style={{ color: "#94A3B8", fontSize: 10, fontWeight: "700", textTransform: "uppercase" }}>
+              <Text
+                style={{
+                  color: "#94A3B8",
+                  fontSize: 10,
+                  fontWeight: "700",
+                  textTransform: "uppercase",
+                }}
+              >
                 To Receive
               </Text>
               <Text style={{ color: "#FFFFFF", fontSize: 18, fontWeight: "900", marginTop: 2 }}>
@@ -765,7 +809,14 @@ export default function Dashboard() {
               <View className="w-8 h-8 rounded-lg bg-[#818CF8]/10 justify-center items-center mb-2.5">
                 <Clock size={16} color="#818CF8" />
               </View>
-              <Text style={{ color: "#94A3B8", fontSize: 10, fontWeight: "700", textTransform: "uppercase" }}>
+              <Text
+                style={{
+                  color: "#94A3B8",
+                  fontSize: 10,
+                  fontWeight: "700",
+                  textTransform: "uppercase",
+                }}
+              >
                 Transactions
               </Text>
               <Text style={{ color: "#FFFFFF", fontSize: 18, fontWeight: "900", marginTop: 2 }}>
@@ -1070,15 +1121,27 @@ export default function Dashboard() {
                             alignItems: "center",
                           }}
                         >
-                          <Text style={{ color: Colors.accentCyan, fontWeight: "900", fontSize: 15 }}>
+                          <Text
+                            style={{ color: Colors.accentCyan, fontWeight: "900", fontSize: 15 }}
+                          >
                             {firstLetter}
                           </Text>
                         </View>
                         <View className="ml-3 flex-1">
-                          <Text style={{ color: "#FFFFFF", fontSize: 13, fontWeight: "700" }} numberOfLines={1}>
+                          <Text
+                            style={{ color: "#FFFFFF", fontSize: 13, fontWeight: "700" }}
+                            numberOfLines={1}
+                          >
                             {g.name}
                           </Text>
-                          <Text style={{ color: "#94A3B8", fontSize: 9, fontWeight: "600", marginTop: 1 }}>
+                          <Text
+                            style={{
+                              color: "#94A3B8",
+                              fontSize: 9,
+                              fontWeight: "600",
+                              marginTop: 1,
+                            }}
+                          >
                             {count} {count === 1 ? "member" : "members"}
                           </Text>
                         </View>
@@ -1105,7 +1168,9 @@ export default function Dashboard() {
               </View>
             ) : (
               <View className="items-center py-6">
-                <Text style={{ color: "#94A3B8", fontSize: 12, fontWeight: "600", textAlign: "center" }}>
+                <Text
+                  style={{ color: "#94A3B8", fontSize: 12, fontWeight: "600", textAlign: "center" }}
+                >
                   No groups yet
                 </Text>
                 <TouchableOpacity
@@ -1193,10 +1258,20 @@ export default function Dashboard() {
                           </Text>
                         </View>
                         <View className="ml-3 flex-1">
-                          <Text style={{ color: "#FFFFFF", fontSize: 13, fontWeight: "700" }} numberOfLines={1}>
+                          <Text
+                            style={{ color: "#FFFFFF", fontSize: 13, fontWeight: "700" }}
+                            numberOfLines={1}
+                          >
                             {item.description}
                           </Text>
-                          <Text style={{ color: "#94A3B8", fontSize: 9, fontWeight: "600", marginTop: 1 }}>
+                          <Text
+                            style={{
+                              color: "#94A3B8",
+                              fontSize: 9,
+                              fontWeight: "600",
+                              marginTop: 1,
+                            }}
+                          >
                             {item.category?.name || "Other"} • Personal
                           </Text>
                         </View>
@@ -1206,7 +1281,9 @@ export default function Dashboard() {
                         <Text style={{ color: "#FFFFFF", fontSize: 13, fontWeight: "800" }}>
                           ₹{Number(item.amount).toFixed(0)}
                         </Text>
-                        <Text style={{ color: "#94A3B8", fontSize: 8, fontWeight: "600", marginTop: 2 }}>
+                        <Text
+                          style={{ color: "#94A3B8", fontSize: 8, fontWeight: "600", marginTop: 2 }}
+                        >
                           {formatTime(item.expense_date)}
                         </Text>
                       </View>
@@ -1226,10 +1303,20 @@ export default function Dashboard() {
                 alignItems: "center",
               }}
             >
-              <Text style={{ color: "#94A3B8", fontSize: 12, fontWeight: "600", textAlign: "center" }}>
+              <Text
+                style={{ color: "#94A3B8", fontSize: 12, fontWeight: "600", textAlign: "center" }}
+              >
                 No expenses yet
               </Text>
-              <Text style={{ color: "#475569", fontSize: 10, fontWeight: "500", textAlign: "center", marginTop: 4 }}>
+              <Text
+                style={{
+                  color: "#475569",
+                  fontSize: 10,
+                  fontWeight: "500",
+                  textAlign: "center",
+                  marginTop: 4,
+                }}
+              >
                 Start tracking your daily spending.
               </Text>
               <TouchableOpacity
@@ -1423,14 +1510,16 @@ export default function Dashboard() {
               </TouchableOpacity>
             </View>
             <Text className="text-accentGray text-xs leading-relaxed mb-4">
-              Paste the invite code (group ID) shared by your friend to join their shared ledger.
+              Enter the invite code shared by your friend to join their group.
             </Text>
             <TextInput
-              className="bg-white/5 border-[0.5px] border-white/10 text-white px-4 py-3 rounded-xl mb-4 text-sm font-semibold"
-              placeholder="Paste invite code..."
-              placeholderTextColor="#666666"
-              onChangeText={setJoinCode}
+              className="bg-white/5 border-[0.5px] border-white/10 text-white px-4 py-3 rounded-xl mb-4 text-base font-black tracking-widest text-center uppercase"
+              placeholder="ROOM8X"
+              placeholderTextColor="#444444"
+              onChangeText={(t) => setJoinCode(t.toUpperCase())}
               value={joinCode}
+              maxLength={8}
+              autoCapitalize="characters"
             />
             <TouchableOpacity
               onPress={handleJoinGroup}

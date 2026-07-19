@@ -67,7 +67,9 @@ export default function GroupDetail() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isLeaving, setIsLeaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<"overview" | "expenses" | "balances" | "members" | "activity" | "analytics" | "settlements">((tab as any) || "overview");
+  const [activeTab, setActiveTab] = useState<
+    "overview" | "expenses" | "balances" | "members" | "activity" | "analytics" | "settlements"
+  >((tab as any) || "overview");
   const [simplifyDebtsEnabled, setSimplifyDebtsEnabled] = useState(true);
   const [isRegenerating, setIsRegenerating] = useState(false);
 
@@ -118,7 +120,9 @@ export default function GroupDetail() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("expenses")
-        .select("*, payer:profiles(*), category:categories(*), splits:expense_splits(debtor_id, debtor:profiles(*))")
+        .select(
+          "*, payer:profiles(*), category:categories(*), splits:expense_splits(debtor_id, debtor:profiles(*))"
+        )
         .eq("group_id", id)
         .order("expense_date", { ascending: false });
 
@@ -132,10 +136,7 @@ export default function GroupDetail() {
   const { data: peerBalances, isLoading: isBalancesLoading } = useQuery({
     queryKey: ["peer-balances", id],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("peer_balances")
-        .select("*")
-        .eq("group_id", id);
+      const { data, error } = await supabase.from("peer_balances").select("*").eq("group_id", id);
 
       if (error) throw error;
       return (data || []) as any;
@@ -145,14 +146,22 @@ export default function GroupDetail() {
 
   // Mutation to record a settlement payment
   const settleMutation = useMutation({
-    mutationFn: async (settlement: { from: string; to: string; amount: number; notes?: string; date?: string }) => {
+    mutationFn: async (settlement: {
+      from: string;
+      to: string;
+      amount: number;
+      notes?: string;
+      date?: string;
+    }) => {
       const { data: cat } = await supabase
         .from("categories")
         .select("id")
         .eq("name", "Other")
         .single();
 
-      const isoDate = settlement.date ? new Date(settlement.date).toISOString() : new Date().toISOString();
+      const isoDate = settlement.date
+        ? new Date(settlement.date).toISOString()
+        : new Date().toISOString();
 
       const { data: newExpense, error: expError } = await supabase
         .from("expenses")
@@ -172,13 +181,11 @@ export default function GroupDetail() {
 
       if (expError) throw expError;
 
-      const { error: splitError } = await supabase
-        .from("expense_splits")
-        .insert({
-          expense_id: newExpense.id,
-          debtor_id: settlement.to,
-          amount: settlement.amount,
-        });
+      const { error: splitError } = await supabase.from("expense_splits").insert({
+        expense_id: newExpense.id,
+        debtor_id: settlement.to,
+        amount: settlement.amount,
+      });
 
       if (splitError) throw splitError;
     },
@@ -459,13 +466,14 @@ export default function GroupDetail() {
             date: new Date(exp.expense_date),
             title: `${exp.payer?.username ? `@${exp.payer.username}` : exp.payer?.display_name || "Someone"} added "${exp.description}"`,
             subtitle: `₹${exp.amount} • ${exp.category?.name || "Other"}`,
-            icon: exp.category?.icon_name === "shopping-cart"
-              ? "🛒"
-              : exp.category?.icon_name === "utensils"
-              ? "🍕"
-              : exp.category?.icon_name === "home"
-              ? "🏠"
-              : "💸",
+            icon:
+              exp.category?.icon_name === "shopping-cart"
+                ? "🛒"
+                : exp.category?.icon_name === "utensils"
+                  ? "🍕"
+                  : exp.category?.icon_name === "home"
+                    ? "🏠"
+                    : "💸",
           });
         }
       });
@@ -479,7 +487,8 @@ export default function GroupDetail() {
     const nonSettlements = expenses.filter((e: any) => !e.is_settlement);
     const totalSpent = nonSettlements.reduce((sum: number, e: any) => sum + Number(e.amount), 0);
     const averageExpense = nonSettlements.length > 0 ? totalSpent / nonSettlements.length : 0;
-    const largestExpense = nonSettlements.length > 0 ? Math.max(...nonSettlements.map((e: any) => Number(e.amount))) : 0;
+    const largestExpense =
+      nonSettlements.length > 0 ? Math.max(...nonSettlements.map((e: any) => Number(e.amount))) : 0;
 
     // Spending by category
     const catMap: Record<string, { amount: number; color: string; icon: string }> = {};
@@ -493,13 +502,15 @@ export default function GroupDetail() {
       catMap[name].amount += Number(e.amount);
     });
 
-    const categoryList = Object.keys(catMap).map(name => ({
-      name,
-      amount: catMap[name].amount,
-      color: catMap[name].color,
-      icon: catMap[name].icon,
-      percentage: totalSpent > 0 ? (catMap[name].amount / totalSpent) * 100 : 0
-    })).sort((a, b) => b.amount - a.amount);
+    const categoryList = Object.keys(catMap)
+      .map((name) => ({
+        name,
+        amount: catMap[name].amount,
+        color: catMap[name].color,
+        icon: catMap[name].icon,
+        percentage: totalSpent > 0 ? (catMap[name].amount / totalSpent) * 100 : 0,
+      }))
+      .sort((a, b) => b.amount - a.amount);
 
     // Spending by member
     const memMap: Record<string, { amount: number; name: string; avatar: string }> = {};
@@ -513,20 +524,22 @@ export default function GroupDetail() {
       memMap[payerId].amount += Number(e.amount);
     });
 
-    const memberList = Object.keys(memMap).map(id => ({
-      id,
-      name: memMap[id].name,
-      avatar: memMap[id].avatar,
-      amount: memMap[id].amount,
-      percentage: totalSpent > 0 ? (memMap[id].amount / totalSpent) * 100 : 0
-    })).sort((a, b) => b.amount - a.amount);
+    const memberList = Object.keys(memMap)
+      .map((id) => ({
+        id,
+        name: memMap[id].name,
+        avatar: memMap[id].avatar,
+        amount: memMap[id].amount,
+        percentage: totalSpent > 0 ? (memMap[id].amount / totalSpent) * 100 : 0,
+      }))
+      .sort((a, b) => b.amount - a.amount);
 
     return {
       totalSpent,
       averageExpense,
       largestExpense,
       categories: categoryList,
-      members: memberList
+      members: memberList,
     };
   }, [expenses]);
 
@@ -579,17 +592,20 @@ export default function GroupDetail() {
   }
 
   // Active list dataset
-  const listData = activeTab === "overview"
-    ? (expenses?.filter((e: any) => !e.is_settlement).slice(0, 3) || [])
-    : activeTab === "expenses"
-    ? expenses?.filter((e: any) => !e.is_settlement)
-    : activeTab === "balances"
-    ? (simplifyDebtsEnabled ? simplifiedDebts : rawDebts)
-    : activeTab === "members"
-    ? members
-    : activeTab === "activity"
-    ? activityList
-    : [];
+  const listData =
+    activeTab === "overview"
+      ? expenses?.filter((e: any) => !e.is_settlement).slice(0, 3) || []
+      : activeTab === "expenses"
+        ? expenses?.filter((e: any) => !e.is_settlement)
+        : activeTab === "balances"
+          ? simplifyDebtsEnabled
+            ? simplifiedDebts
+            : rawDebts
+          : activeTab === "members"
+            ? members
+            : activeTab === "activity"
+              ? activityList
+              : [];
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#0B1220" }}>
@@ -604,7 +620,10 @@ export default function GroupDetail() {
         >
           <ChevronLeft size={20} color={Colors.accentCyan} />
         </TouchableOpacity>
-        <Text className="text-white text-lg font-bold flex-1 text-center ml-2 mr-2" numberOfLines={1}>
+        <Text
+          className="text-white text-lg font-bold flex-1 text-center ml-2 mr-2"
+          numberOfLines={1}
+        >
           {group.name}
         </Text>
         <TouchableOpacity
@@ -620,619 +639,756 @@ export default function GroupDetail() {
 
       <View style={{ flex: 1, position: "relative" }}>
         <FlatList
-        data={listData}
-        keyExtractor={(item, index) => item.id || item.profile?.id || `${item.from}-${item.to}-${index}`}
-        contentContainerStyle={{ padding: 24, paddingBottom: 100 }}
-        refreshControl={
-          <RefreshControl
-            refreshing={isExpensesLoading || isBalancesLoading || isMembersLoading}
-            onRefresh={() => {
-              Theme.haptics.light();
-              queryClient.invalidateQueries({ queryKey: ["group", id] });
-              queryClient.invalidateQueries({ queryKey: ["group-members", id] });
-              queryClient.invalidateQueries({ queryKey: ["group-expenses", id] });
-              queryClient.invalidateQueries({ queryKey: ["peer-balances", id] });
-            }}
-            tintColor={Colors.accentCyan}
-          />
-        }
-        ListHeaderComponent={
-          <>
-            {/* Banner Category Card */}
-            <View className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-5 mb-6 items-center flex-row justify-between shadow-lg">
-              <View className="flex-row items-center flex-1 mr-4">
-                <View className={`w-12 h-12 justify-center items-center rounded-full border-[0.5px] mr-3 ${avatar.bgClass}`}>
-                  <Text className={`text-lg font-black ${avatar.textClass}`}>{avatar.letter}</Text>
-                </View>
-                <View className="flex-1">
-                  <Text className="text-white text-lg font-black">{group.name}</Text>
-                  <Text className="text-[#94A3B8] text-[10px] mt-0.5" numberOfLines={1}>
-                    {group.description || `Type: ${group.type}`}
-                  </Text>
-                </View>
-              </View>
-            </View>
-
-            {/* Quick Stats Header widget */}
-            {activeTab === "overview" && expenses && expenses.filter((e: any) => !e.is_settlement).length > 0 && (
-              <View className="bg-[#151E2E]/60 border-[0.5px] border-white/5 rounded-2xl p-4 mb-6 flex-row justify-between shadow-md">
-                <View className="flex-grow flex-shrink">
-                  <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-wider mb-1">Group Spent</Text>
-                  <Text className="text-white text-base font-black">₹{analyticsData?.totalSpent.toFixed(0)}</Text>
-                </View>
-                <View className="flex-grow flex-shrink items-center border-x border-white/5 px-2">
-                  <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-wider mb-1">Average</Text>
-                  <Text className="text-white text-base font-black">₹{analyticsData?.averageExpense.toFixed(0)}</Text>
-                </View>
-                <View className="flex-grow flex-shrink items-end pl-2">
-                  <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-wider mb-1">
-                    {(netBalances[user?.id || ""] || 0) > 0.01 
-                      ? "To Receive" 
-                      : (netBalances[user?.id || ""] || 0) < -0.01 
-                      ? "To Pay" 
-                      : "Net Balance"}
-                  </Text>
-                  <Text className={`text-base font-black ${
-                    (netBalances[user?.id || ""] || 0) > 0.01
-                      ? "text-[#22C55E]"
-                      : (netBalances[user?.id || ""] || 0) < -0.01
-                      ? "text-[#EF4444]"
-                      : "text-white"
-                  }`}>
-                    {(netBalances[user?.id || ""] || 0) > 0.01 ? "+" : ""}₹{(netBalances[user?.id || ""] || 0).toFixed(0)}
-                  </Text>
-                </View>
-              </View>
-            )}
-
-            {/* Recent Activity widget */}
-            {activeTab === "overview" && activityList.length > 0 && (
-              <View className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-4 mb-6 shadow-md">
-                <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-wider mb-2">Recent Activity</Text>
-                <View className="flex-row items-center">
-                  <View className="w-8 h-8 rounded-xl bg-white/5 justify-center items-center mr-2.5 border border-white/10">
-                    <Text className="text-sm">{activityList[0].icon}</Text>
+          data={listData}
+          keyExtractor={(item, index) =>
+            item.id || item.profile?.id || `${item.from}-${item.to}-${index}`
+          }
+          contentContainerStyle={{ padding: 24, paddingBottom: 100 }}
+          refreshControl={
+            <RefreshControl
+              refreshing={isExpensesLoading || isBalancesLoading || isMembersLoading}
+              onRefresh={() => {
+                Theme.haptics.light();
+                queryClient.invalidateQueries({ queryKey: ["group", id] });
+                queryClient.invalidateQueries({ queryKey: ["group-members", id] });
+                queryClient.invalidateQueries({ queryKey: ["group-expenses", id] });
+                queryClient.invalidateQueries({ queryKey: ["peer-balances", id] });
+              }}
+              tintColor={Colors.accentCyan}
+            />
+          }
+          ListHeaderComponent={
+            <>
+              {/* Banner Category Card */}
+              <View className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-5 mb-6 items-center flex-row justify-between shadow-lg">
+                <View className="flex-row items-center flex-1 mr-4">
+                  <View
+                    className={`w-12 h-12 justify-center items-center rounded-full border-[0.5px] mr-3 ${avatar.bgClass}`}
+                  >
+                    <Text className={`text-lg font-black ${avatar.textClass}`}>
+                      {avatar.letter}
+                    </Text>
                   </View>
                   <View className="flex-1">
-                    <Text className="text-white text-xs font-semibold" numberOfLines={1}>{activityList[0].title}</Text>
-                    <Text className="text-[#94A3B8] text-[9px] mt-0.5">{activityList[0].subtitle}</Text>
+                    <Text className="text-white text-lg font-black">{group.name}</Text>
+                    <Text className="text-[#94A3B8] text-[10px] mt-0.5" numberOfLines={1}>
+                      {group.description || `Type: ${group.type}`}
+                    </Text>
                   </View>
                 </View>
               </View>
-            )}
 
-            {/* Custom Tab Switcher */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-6">
-              <View className="flex-row bg-[#151E2E] border-[0.5px] border-white/5 rounded-xl p-1 shadow-md">
-                {(["overview", "expenses", "balances", "members", "activity"] as const).map((tab) => (
-                  <TouchableOpacity
-                    key={tab}
-                    onPress={() => {
-                      Theme.haptics.light();
-                      setActiveTab(tab);
-                    }}
-                    className={`px-4 py-2 rounded-lg items-center justify-center mr-1 ${
-                      activeTab === tab ? "bg-white/5 border border-white/10" : ""
-                    }`}
-                  >
-                    <Text
-                      className={`text-xs font-bold capitalize ${
-                        activeTab === tab ? "text-[#14E5D4]" : "text-[#94A3B8]"
-                      }`}
-                    >
-                      {tab}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </ScrollView>
-
-            {activeTab === "overview" && listData.length > 0 && (
-              <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-wider mb-3">Recent Group Expenses</Text>
-            )}
-
-            {/* Inline Net Balances Grid shown in Balances Tab */}
-            {activeTab === "balances" && (
-              <View className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-5 mb-6 shadow-lg">
-                <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-3">
-                  Net Balances
-                </Text>
-                {members?.map((m: any) => {
-                  const balVal = netBalances[m.profile.id] || 0;
-                  const isCred = balVal > 0.01;
-                  const isDeb = balVal < -0.01;
-                  const mAvatar = getGroupAvatarStyles(m.profile.username ? `@${m.profile.username}` : m.profile.display_name);
-
-                  return (
-                    <View
-                      key={m.profile.id}
-                      className="flex-row items-center justify-between py-2.5 border-b-[0.5px] border-white/5"
-                    >
-                      <View className="flex-row items-center">
-                        <View className={`w-8 h-8 rounded-full border-[0.5px] justify-center items-center mr-2.5 ${mAvatar.bgClass}`}>
-                          <Text className={`text-xs font-bold ${mAvatar.textClass}`}>{mAvatar.letter}</Text>
-                        </View>
-                        <Text className="text-white text-sm font-semibold">
-                          {m.profile.username ? `@${m.profile.username}` : m.profile.display_name}
-                        </Text>
-                      </View>
-                      <Text
-                        className={`text-sm font-bold ${
-                          isCred ? "text-[#22C55E]" : isDeb ? "text-[#EF4444]" : "text-[#94A3B8]"
-                        }`}
-                      >
-                        {isCred ? `+ ₹${balVal.toFixed(0)}` : isDeb ? `- ₹${Math.abs(balVal).toFixed(0)}` : "Settled"}
+              {/* Invite Friends Section at the top of Group Details (Overview tab) */}
+              {activeTab === "overview" && (
+                <View className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-5 mb-6 shadow-lg">
+                  <View className="flex-row justify-between items-center mb-3">
+                    <Text className="text-white text-sm font-black">Invite Friends</Text>
+                    <View className="bg-accentCyan/10 px-2 py-0.5 rounded border border-accentCyan/20">
+                      <Text className="text-accentCyan text-[9px] font-black uppercase">
+                        Code: {group.invite_code || "—"}
                       </Text>
                     </View>
-                  );
-                })}
-              </View>
-            )}
+                  </View>
 
-            {/* Balances Subheading */}
-            {activeTab === "balances" && (
-              <View className="flex-row justify-between items-center mb-4">
-                <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest">
-                  Suggested Payments
-                </Text>
-                <TouchableOpacity
-                  onPress={() => {
-                    Theme.haptics.light();
-                    setSimplifyDebtsEnabled(!simplifyDebtsEnabled);
-                  }}
-                  className="bg-[#151E2E] border-[0.5px] border-white/5 px-2.5 py-1 rounded-lg"
-                >
-                  <Text className="text-[10px] text-accentCyan font-bold">
-                    {simplifyDebtsEnabled ? "Debts Simplified" : "Raw Debts"}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {/* Invite Friends Card in Members Tab */}
-            {activeTab === "members" && (
-              <View className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-5 mb-6 shadow-lg">
-                <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-3">
-                  Invite Friends
-                </Text>
-
-                {/* Invite Code Display */}
-                <View className="items-center bg-white/5 border-[0.5px] border-white/10 rounded-xl p-4 mb-4">
-                  <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-widest mb-1">Invite Code</Text>
-                  <Text className="text-white text-2xl font-black tracking-[5px]">
-                    {group.invite_code || "—"}
-                  </Text>
-                </View>
-
-                {/* Action Buttons Row */}
-                <View className="flex-row gap-2">
-                  {/* Copy */}
-                  <TouchableOpacity
-                    onPress={async () => {
-                      Theme.haptics.light();
-                      const code = group.invite_code || group.id;
-                      await Clipboard.setStringAsync(code);
-                      showToast("Invite code copied.", "success");
-                    }}
-                    className="flex-1 flex-row items-center justify-center bg-white/5 border-[0.5px] border-white/10 py-3 rounded-xl active:scale-95"
-                  >
-                    <Copy size={14} color="#14E5D4" />
-                    <Text className="text-white text-xs font-bold ml-1.5">Copy</Text>
-                  </TouchableOpacity>
-
-                  {/* Share */}
-                  <TouchableOpacity
-                    onPress={async () => {
-                      Theme.haptics.light();
-                      const code = group.invite_code || group.id;
-                      try {
-                        await Share.share({
-                          title: `Join ${group.name} on hiSaab`,
-                          message: `Join my hiSaab group!\n\nGroup:\n${group.name}\n\nInvite Code:\n${code}\n\nSee you inside 👋`,
-                        });
-                      } catch {}
-                    }}
-                    className="flex-1 flex-row items-center justify-center bg-white/5 border-[0.5px] border-white/10 py-3 rounded-xl active:scale-95"
-                  >
-                    <Share2 size={14} color="#14E5D4" />
-                    <Text className="text-white text-xs font-bold ml-1.5">Share</Text>
-                  </TouchableOpacity>
-
-                  {/* Regenerate (admin only) */}
-                  {group.created_by === user?.id && (
+                  <View className="flex-row gap-2">
                     <TouchableOpacity
                       onPress={async () => {
                         Theme.haptics.light();
-                        setIsRegenerating(true);
-                        try {
-                          const { data, error } = await supabase.rpc("regenerate_invite_code", {
-                            p_group_id: id,
-                            p_user_id: user?.id,
-                          });
-                          if (error) throw error;
-                          queryClient.invalidateQueries({ queryKey: ["group", id] });
-                          showToast("Invite code regenerated.", "success");
-                        } catch (e: any) {
-                          showToast(e.message || "Failed to regenerate code", "error");
-                        } finally {
-                          setIsRegenerating(false);
-                        }
+                        const code = group.invite_code || group.id;
+                        await Clipboard.setStringAsync(code);
+                        showToast("Invite code copied.", "success");
                       }}
-                      disabled={isRegenerating}
-                      className="flex-1 flex-row items-center justify-center bg-white/5 border-[0.5px] border-white/10 py-3 rounded-xl active:scale-95"
+                      className="flex-1 flex-row items-center justify-center bg-white/5 border-[0.5px] border-white/10 py-2.5 rounded-xl active:scale-95"
                     >
-                      {isRegenerating ? (
-                        <ActivityIndicator size="small" color="#14E5D4" />
-                      ) : (
-                        <>
-                          <RefreshCw size={14} color="#F59E0B" />
-                          <Text className="text-white text-xs font-bold ml-1.5">New Code</Text>
-                        </>
-                      )}
+                      <Copy size={13} color="#14E5D4" />
+                      <Text className="text-white text-xs font-bold ml-1.5">Copy Code</Text>
                     </TouchableOpacity>
-                  )}
-                </View>
-              </View>
-            )}
 
-            {/* Analytics Tab layout */}
-            {activeTab === "analytics" && analyticsData && (
-              <View className="space-y-6">
-                {/* Visual Overview */}
-                <View className="bg-[#151E2E] border-[0.5px] border-white/5 p-5 rounded-2xl shadow-lg">
-                  <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-4">Redistribution Stats</Text>
-                  <View className="space-y-4">
-                    <View className="flex-row justify-between py-1 border-b border-white/5">
-                      <Text className="text-[#94A3B8] text-xs font-medium">Total Spent</Text>
-                      <Text className="text-white text-sm font-black">₹{analyticsData.totalSpent.toFixed(0)}</Text>
-                    </View>
-                    <View className="flex-row justify-between py-1 border-b border-white/5 mt-2">
-                      <Text className="text-[#94A3B8] text-xs font-medium">Average Expense</Text>
-                      <Text className="text-white text-sm font-black">₹{analyticsData.averageExpense.toFixed(0)}</Text>
-                    </View>
-                    <View className="flex-row justify-between py-1 mt-2">
-                      <Text className="text-[#94A3B8] text-xs font-medium">Largest Expense</Text>
-                      <Text className="text-white text-sm font-black">₹{analyticsData.largestExpense.toFixed(0)}</Text>
-                    </View>
-                  </View>
-                </View>
-
-                {/* Spending by Category progress bars */}
-                <View className="bg-[#151E2E] border-[0.5px] border-white/5 p-5 rounded-2xl mt-4 shadow-lg">
-                  <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-4">By Category</Text>
-                  {analyticsData.categories.length > 0 ? (
-                    analyticsData.categories.map((c, idx) => (
-                      <View key={c.name} className={`${idx > 0 ? "mt-4" : ""}`}>
-                        <View className="flex-row justify-between items-center mb-1">
-                          <Text className="text-white text-xs font-semibold">{c.name}</Text>
-                          <Text className="text-[#94A3B8] text-xs font-bold">₹{c.amount.toFixed(0)} ({c.percentage.toFixed(0)}%)</Text>
-                        </View>
-                        <View className="h-2 bg-[#0B1220] rounded-full overflow-hidden">
-                          <View
-                            style={{ width: `${c.percentage}%`, backgroundColor: c.color }}
-                            className="h-full rounded-full"
-                          />
-                        </View>
-                      </View>
-                    ))
-                  ) : (
-                    <Text className="text-[#94A3B8] text-xs italic">No expenses logged yet.</Text>
-                  )}
-                </View>
-
-                {/* Spending by Member contribution progress bars */}
-                <View className="bg-[#151E2E] border-[0.5px] border-white/5 p-5 rounded-2xl mt-4 shadow-lg">
-                  <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-4">Payer Contribution</Text>
-                  {analyticsData.members.length > 0 ? (
-                    analyticsData.members.map((m, idx) => (
-                      <View key={m.id} className={`${idx > 0 ? "mt-4" : ""}`}>
-                        <View className="flex-row justify-between items-center mb-1">
-                          <View className="flex-row items-center">
-                            <Text className="text-xs mr-1">{m.avatar}</Text>
-                            <Text className="text-white text-xs font-semibold">{m.name}</Text>
-                          </View>
-                          <Text className="text-[#94A3B8] text-xs font-bold">₹{m.amount.toFixed(0)} ({m.percentage.toFixed(0)}%)</Text>
-                        </View>
-                        <View className="h-2 bg-[#0B1220] rounded-full overflow-hidden">
-                          <View
-                            style={{ width: `${m.percentage}%` }}
-                            className="h-full bg-accentCyan rounded-full"
-                          />
-                        </View>
-                      </View>
-                    ))
-                  ) : (
-                    <Text className="text-[#94A3B8] text-xs italic">No contributions logged.</Text>
-                  )}
-                </View>
-              </View>
-            )}
-          </>
-        }
-        renderItem={({ item }) => {
-          if (activeTab === "expenses" || activeTab === "overview") {
-            const isPayer = item.paid_by === user?.id;
-
-            return (
-              <View className="bg-[#151E2E] border-[0.5px] border-white/5 p-4 rounded-2xl mb-3 shadow-md">
-                <View className="flex-row items-center">
-                  <View className="w-10 h-10 justify-center items-center rounded-xl bg-white/5 mr-3">
-                    <Text className="text-base">
-                      {item.category?.icon_name === "shopping-cart"
-                        ? "🛒"
-                        : item.category?.icon_name === "utensils"
-                        ? "🍕"
-                        : item.category?.icon_name === "home"
-                        ? "🏠"
-                        : "💸"}
-                    </Text>
-                  </View>
-                  <View className="flex-1 mr-2">
-                    <Text className="text-white text-sm font-bold" numberOfLines={1}>
-                      {item.description}
-                    </Text>
-                    <Text className="text-[#94A3B8] text-[10px] mt-0.5" numberOfLines={1}>
-                      Paid by {item.payer?.username ? `@${item.payer.username}` : item.payer?.display_name || "Deleted User"}
-                    </Text>
-                  </View>
-                  <View className="items-end mr-3">
-                    <Text className="text-white font-bold text-sm">₹ {item.amount}</Text>
-                    <Text className="text-[#94A3B8] text-[9px] mt-0.5">
-                      {new Date(item.expense_date).toLocaleDateString()}
-                    </Text>
-                  </View>
-                  {isPayer && (
-                    <View className="flex-row space-x-1">
-                      <TouchableOpacity
-                        onPress={() => {
-                          Theme.haptics.light();
-                          router.push({
-                            pathname: "/groups/add-expense",
-                            params: { groupId: id, expenseId: item.id },
+                    <TouchableOpacity
+                      onPress={async () => {
+                        Theme.haptics.light();
+                        const code = group.invite_code || group.id;
+                        try {
+                          await Share.share({
+                            message: `Join my hiSaab group!\n\nGroup: ${group.name}\nInvite Code: ${code}\n\nOpen hiSaab → Groups → Join Group and enter this code.`,
                           });
-                        }}
-                        className="p-2 rounded-lg bg-white/5 mr-1 active:opacity-80 border-[0.5px] border-white/10"
-                      >
-                        <Text className="text-[#14E5D4] text-[9px] font-bold">Edit</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        onPress={() => {
-                          Theme.haptics.medium();
-                          deleteExpenseMutation.mutate(item.id);
-                        }}
-                        className="p-2 rounded-lg bg-white/5 active:opacity-80 border-[0.5px] border-white/10"
-                      >
-                        <Text className="text-[#EF4444] text-[9px] font-bold">Del</Text>
-                      </TouchableOpacity>
-                    </View>
-                  )}
+                        } catch {}
+                      }}
+                      className="flex-grow flex-shrink flex-row items-center justify-center bg-white/5 border-[0.5px] border-white/10 py-2.5 rounded-xl active:scale-95"
+                    >
+                      <Share2 size={13} color="#14E5D4" />
+                      <Text className="text-white text-xs font-bold ml-1.5">Share Invite</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
-              </View>
-            );
-          } else if (activeTab === "settlements") {
-            const recipient = item.splits?.[0]?.debtor;
-            const settlementsList = expenses?.filter((e: any) => e.is_settlement) || [];
-            const isLatest = settlementsList.length > 0 && settlementsList[0].id === item.id;
+              )}
 
-            return (
-              <View className="bg-[#151E2E] border-[0.5px] border-white/5 p-4 rounded-2xl mb-3 shadow-md">
-                <View className="flex-row items-center justify-between">
-                  <View className="flex-row items-center flex-1 mr-2">
-                    <View className="w-8 h-8 justify-center items-center rounded-lg bg-[#22C55E]/10 mr-2.5">
-                      <Text className="text-base">🤝</Text>
+              {/* Quick Stats Header widget */}
+              {activeTab === "overview" &&
+                expenses &&
+                expenses.filter((e: any) => !e.is_settlement).length > 0 && (
+                  <View className="bg-[#151E2E]/60 border-[0.5px] border-white/5 rounded-2xl p-4 mb-6 flex-row justify-between shadow-md">
+                    <View className="flex-grow flex-shrink">
+                      <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-wider mb-1">
+                        Group Spent
+                      </Text>
+                      <Text className="text-white text-base font-black">
+                        ₹{analyticsData?.totalSpent.toFixed(0)}
+                      </Text>
+                    </View>
+                    <View className="flex-grow flex-shrink items-center border-x border-white/5 px-2">
+                      <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-wider mb-1">
+                        Average
+                      </Text>
+                      <Text className="text-white text-base font-black">
+                        ₹{analyticsData?.averageExpense.toFixed(0)}
+                      </Text>
+                    </View>
+                    <View className="flex-grow flex-shrink items-end pl-2">
+                      <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-wider mb-1">
+                        {(netBalances[user?.id || ""] || 0) > 0.01
+                          ? "To Receive"
+                          : (netBalances[user?.id || ""] || 0) < -0.01
+                            ? "To Pay"
+                            : "Net Balance"}
+                      </Text>
+                      <Text
+                        className={`text-base font-black ${
+                          (netBalances[user?.id || ""] || 0) > 0.01
+                            ? "text-[#22C55E]"
+                            : (netBalances[user?.id || ""] || 0) < -0.01
+                              ? "text-[#EF4444]"
+                              : "text-white"
+                        }`}
+                      >
+                        {(netBalances[user?.id || ""] || 0) > 0.01 ? "+" : ""}₹
+                        {(netBalances[user?.id || ""] || 0).toFixed(0)}
+                      </Text>
+                    </View>
+                  </View>
+                )}
+
+              {/* Recent Activity widget */}
+              {activeTab === "overview" && activityList.length > 0 && (
+                <View className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-4 mb-6 shadow-md">
+                  <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-wider mb-2">
+                    Recent Activity
+                  </Text>
+                  <View className="flex-row items-center">
+                    <View className="w-8 h-8 rounded-xl bg-white/5 justify-center items-center mr-2.5 border border-white/10">
+                      <Text className="text-sm">{activityList[0].icon}</Text>
                     </View>
                     <View className="flex-1">
-                      <Text className="text-white text-sm font-bold" numberOfLines={1}>
-                        {item.payer?.username ? `@${item.payer.username}` : item.payer?.display_name || "Someone"} paid {recipient?.username ? `@${recipient.username}` : recipient?.display_name || "Someone"}
+                      <Text className="text-white text-xs font-semibold" numberOfLines={1}>
+                        {activityList[0].title}
                       </Text>
-                      {item.notes ? (
-                        <Text className="text-[#94A3B8] text-[10px] mt-0.5 italic">
-                          "{item.notes}"
-                        </Text>
-                      ) : null}
-                      <Text className="text-[#94A3B8] text-[9px] mt-1">
-                        {new Date(item.expense_date).toLocaleDateString()} • {new Date(item.expense_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      <Text className="text-[#94A3B8] text-[9px] mt-0.5">
+                        {activityList[0].subtitle}
                       </Text>
                     </View>
                   </View>
-                  <View className="items-end justify-center">
-                    <Text className="text-[#22C55E] font-extrabold text-sm">₹ {item.amount}</Text>
-                    {isLatest && (
+                </View>
+              )}
+
+              {/* Custom Tab Switcher */}
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-6">
+                <View className="flex-row bg-[#151E2E] border-[0.5px] border-white/5 rounded-xl p-1 shadow-md">
+                  {(["overview", "expenses", "balances", "members", "activity"] as const).map(
+                    (tab) => (
                       <TouchableOpacity
+                        key={tab}
                         onPress={() => {
-                          Theme.haptics.medium();
-                          deleteExpenseMutation.mutate(item.id);
+                          Theme.haptics.light();
+                          setActiveTab(tab);
                         }}
-                        style={{
-                          marginTop: 6,
-                          backgroundColor: "rgba(239, 68, 68, 0.1)",
-                          borderColor: "rgba(239, 68, 68, 0.2)",
-                          borderWidth: 0.5,
-                          borderRadius: 8,
-                          paddingHorizontal: 8,
-                          paddingVertical: 4,
-                        }}
-                        className="active:opacity-85"
+                        className={`px-4 py-2 rounded-lg items-center justify-center mr-1 ${
+                          activeTab === tab ? "bg-white/5 border border-white/10" : ""
+                        }`}
                       >
-                        <Text style={{ color: "#EF4444", fontSize: 9, fontWeight: "800" }}>Delete</Text>
+                        <Text
+                          className={`text-xs font-bold capitalize ${
+                            activeTab === tab ? "text-[#14E5D4]" : "text-[#94A3B8]"
+                          }`}
+                        >
+                          {tab}
+                        </Text>
+                      </TouchableOpacity>
+                    )
+                  )}
+                </View>
+              </ScrollView>
+
+              {activeTab === "overview" && listData.length > 0 && (
+                <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-wider mb-3">
+                  Recent Group Expenses
+                </Text>
+              )}
+
+              {/* Inline Net Balances Grid shown in Balances Tab */}
+              {activeTab === "balances" && (
+                <View className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-5 mb-6 shadow-lg">
+                  <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-3">
+                    Net Balances
+                  </Text>
+                  {members?.map((m: any) => {
+                    const balVal = netBalances[m.profile.id] || 0;
+                    const isCred = balVal > 0.01;
+                    const isDeb = balVal < -0.01;
+                    const mAvatar = getGroupAvatarStyles(
+                      m.profile.username ? `@${m.profile.username}` : m.profile.display_name
+                    );
+
+                    return (
+                      <View
+                        key={m.profile.id}
+                        className="flex-row items-center justify-between py-2.5 border-b-[0.5px] border-white/5"
+                      >
+                        <View className="flex-row items-center">
+                          <View
+                            className={`w-8 h-8 rounded-full border-[0.5px] justify-center items-center mr-2.5 ${mAvatar.bgClass}`}
+                          >
+                            <Text className={`text-xs font-bold ${mAvatar.textClass}`}>
+                              {mAvatar.letter}
+                            </Text>
+                          </View>
+                          <Text className="text-white text-sm font-semibold">
+                            {m.profile.username ? `@${m.profile.username}` : m.profile.display_name}
+                          </Text>
+                        </View>
+                        <Text
+                          className={`text-sm font-bold ${
+                            isCred ? "text-[#22C55E]" : isDeb ? "text-[#EF4444]" : "text-[#94A3B8]"
+                          }`}
+                        >
+                          {isCred
+                            ? `+ ₹${balVal.toFixed(0)}`
+                            : isDeb
+                              ? `- ₹${Math.abs(balVal).toFixed(0)}`
+                              : "Settled"}
+                        </Text>
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+
+              {/* Balances Subheading */}
+              {activeTab === "balances" && (
+                <View className="flex-row justify-between items-center mb-4">
+                  <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest">
+                    Suggested Payments
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => {
+                      Theme.haptics.light();
+                      setSimplifyDebtsEnabled(!simplifyDebtsEnabled);
+                    }}
+                    className="bg-[#151E2E] border-[0.5px] border-white/5 px-2.5 py-1 rounded-lg"
+                  >
+                    <Text className="text-[10px] text-accentCyan font-bold">
+                      {simplifyDebtsEnabled ? "Debts Simplified" : "Raw Debts"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/* Invite Friends Card in Members Tab */}
+              {activeTab === "members" && (
+                <View className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-5 mb-6 shadow-lg">
+                  <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-3">
+                    Invite Friends
+                  </Text>
+
+                  {/* Invite Code Display */}
+                  <View className="items-center bg-white/5 border-[0.5px] border-white/10 rounded-xl p-4 mb-4">
+                    <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-widest mb-1">
+                      Invite Code
+                    </Text>
+                    <Text className="text-white text-2xl font-black tracking-[5px]">
+                      {group.invite_code || "—"}
+                    </Text>
+                  </View>
+
+                  {/* Action Buttons Row */}
+                  <View className="flex-row gap-2">
+                    {/* Copy */}
+                    <TouchableOpacity
+                      onPress={async () => {
+                        Theme.haptics.light();
+                        const code = group.invite_code || group.id;
+                        await Clipboard.setStringAsync(code);
+                        showToast("Invite code copied.", "success");
+                      }}
+                      className="flex-1 flex-row items-center justify-center bg-white/5 border-[0.5px] border-white/10 py-3 rounded-xl active:scale-95"
+                    >
+                      <Copy size={14} color="#14E5D4" />
+                      <Text className="text-white text-xs font-bold ml-1.5">Copy Code</Text>
+                    </TouchableOpacity>
+
+                    {/* Share */}
+                    <TouchableOpacity
+                      onPress={async () => {
+                        Theme.haptics.light();
+                        const code = group.invite_code || group.id;
+                        try {
+                          await Share.share({
+                            message: `Join my hiSaab group!\n\nGroup: ${group.name}\nInvite Code: ${code}\n\nOpen hiSaab → Groups → Join Group and enter this code.`,
+                          });
+                        } catch {}
+                      }}
+                      className="flex-grow flex-shrink flex-row items-center justify-center bg-white/5 border-[0.5px] border-white/10 py-3 rounded-xl active:scale-95"
+                    >
+                      <Share2 size={14} color="#14E5D4" />
+                      <Text className="text-white text-xs font-bold ml-1.5">Share Invite</Text>
+                    </TouchableOpacity>
+
+                    {/* Regenerate (admin only) */}
+                    {group.created_by === user?.id && (
+                      <TouchableOpacity
+                        onPress={async () => {
+                          Theme.haptics.light();
+                          setIsRegenerating(true);
+                          try {
+                            const { data, error } = await supabase.rpc("regenerate_invite_code", {
+                              p_group_id: id,
+                              p_user_id: user?.id,
+                            });
+                            if (error) throw error;
+                            queryClient.invalidateQueries({ queryKey: ["group", id] });
+                            showToast("Invite code regenerated.", "success");
+                          } catch (e: any) {
+                            showToast(e.message || "Failed to regenerate code", "error");
+                          } finally {
+                            setIsRegenerating(false);
+                          }
+                        }}
+                        disabled={isRegenerating}
+                        className="flex-1 flex-row items-center justify-center bg-white/5 border-[0.5px] border-white/10 py-3 rounded-xl active:scale-95"
+                      >
+                        {isRegenerating ? (
+                          <ActivityIndicator size="small" color="#14E5D4" />
+                        ) : (
+                          <>
+                            <RefreshCw size={14} color="#F59E0B" />
+                            <Text className="text-white text-xs font-bold ml-1.5">New Code</Text>
+                          </>
+                        )}
                       </TouchableOpacity>
                     )}
                   </View>
                 </View>
-              </View>
-            );
-          } else if (activeTab === "balances") {
-            const fromMember = members?.find((m: any) => m.profile.id === item.from)?.profile;
-            const toMember = members?.find((m: any) => m.profile.id === item.to)?.profile;
-            const canSettle = item.from === user?.id || item.to === user?.id;
+              )}
 
-            return (
-              <View className="flex-row items-center justify-between bg-[#151E2E] border-[0.5px] border-white/5 p-4 rounded-2xl mb-3 shadow-md">
-                <View className="flex-1 mr-3">
-                  <Text className="text-white text-sm font-semibold">
-                    {fromMember?.id === user?.id
-                      ? `To Pay: ${toMember?.username ? `@${toMember.username}` : toMember?.display_name || "Someone"}`
-                      : toMember?.id === user?.id
-                      ? `${fromMember?.username ? `@${fromMember.username}` : fromMember?.display_name || "Someone"} to pay you`
-                      : `${fromMember?.username ? `@${fromMember.username}` : fromMember?.display_name || "Someone"} owes ${toMember?.username ? `@${toMember.username}` : toMember?.display_name || "Someone"}`}
-                  </Text>
-                  <Text className={`text-xs mt-1 font-bold ${
-                    fromMember?.id === user?.id 
-                      ? "text-[#EF4444]" 
-                      : toMember?.id === user?.id 
-                      ? "text-[#22C55E]" 
-                      : "text-[#94A3B8]"
-                  }`}>
-                    ₹ {item.amount.toFixed(0)}
-                  </Text>
+              {/* Analytics Tab layout */}
+              {activeTab === "analytics" && analyticsData && (
+                <View className="space-y-6">
+                  {/* Visual Overview */}
+                  <View className="bg-[#151E2E] border-[0.5px] border-white/5 p-5 rounded-2xl shadow-lg">
+                    <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-4">
+                      Redistribution Stats
+                    </Text>
+                    <View className="space-y-4">
+                      <View className="flex-row justify-between py-1 border-b border-white/5">
+                        <Text className="text-[#94A3B8] text-xs font-medium">Total Spent</Text>
+                        <Text className="text-white text-sm font-black">
+                          ₹{analyticsData.totalSpent.toFixed(0)}
+                        </Text>
+                      </View>
+                      <View className="flex-row justify-between py-1 border-b border-white/5 mt-2">
+                        <Text className="text-[#94A3B8] text-xs font-medium">Average Expense</Text>
+                        <Text className="text-white text-sm font-black">
+                          ₹{analyticsData.averageExpense.toFixed(0)}
+                        </Text>
+                      </View>
+                      <View className="flex-row justify-between py-1 mt-2">
+                        <Text className="text-[#94A3B8] text-xs font-medium">Largest Expense</Text>
+                        <Text className="text-white text-sm font-black">
+                          ₹{analyticsData.largestExpense.toFixed(0)}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* Spending by Category progress bars */}
+                  <View className="bg-[#151E2E] border-[0.5px] border-white/5 p-5 rounded-2xl mt-4 shadow-lg">
+                    <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-4">
+                      By Category
+                    </Text>
+                    {analyticsData.categories.length > 0 ? (
+                      analyticsData.categories.map((c, idx) => (
+                        <View key={c.name} className={`${idx > 0 ? "mt-4" : ""}`}>
+                          <View className="flex-row justify-between items-center mb-1">
+                            <Text className="text-white text-xs font-semibold">{c.name}</Text>
+                            <Text className="text-[#94A3B8] text-xs font-bold">
+                              ₹{c.amount.toFixed(0)} ({c.percentage.toFixed(0)}%)
+                            </Text>
+                          </View>
+                          <View className="h-2 bg-[#0B1220] rounded-full overflow-hidden">
+                            <View
+                              style={{ width: `${c.percentage}%`, backgroundColor: c.color }}
+                              className="h-full rounded-full"
+                            />
+                          </View>
+                        </View>
+                      ))
+                    ) : (
+                      <Text className="text-[#94A3B8] text-xs italic">No expenses logged yet.</Text>
+                    )}
+                  </View>
+
+                  {/* Spending by Member contribution progress bars */}
+                  <View className="bg-[#151E2E] border-[0.5px] border-white/5 p-5 rounded-2xl mt-4 shadow-lg">
+                    <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-4">
+                      Payer Contribution
+                    </Text>
+                    {analyticsData.members.length > 0 ? (
+                      analyticsData.members.map((m, idx) => (
+                        <View key={m.id} className={`${idx > 0 ? "mt-4" : ""}`}>
+                          <View className="flex-row justify-between items-center mb-1">
+                            <View className="flex-row items-center">
+                              <Text className="text-xs mr-1">{m.avatar}</Text>
+                              <Text className="text-white text-xs font-semibold">{m.name}</Text>
+                            </View>
+                            <Text className="text-[#94A3B8] text-xs font-bold">
+                              ₹{m.amount.toFixed(0)} ({m.percentage.toFixed(0)}%)
+                            </Text>
+                          </View>
+                          <View className="h-2 bg-[#0B1220] rounded-full overflow-hidden">
+                            <View
+                              style={{ width: `${m.percentage}%` }}
+                              className="h-full bg-accentCyan rounded-full"
+                            />
+                          </View>
+                        </View>
+                      ))
+                    ) : (
+                      <Text className="text-[#94A3B8] text-xs italic">
+                        No contributions logged.
+                      </Text>
+                    )}
+                  </View>
                 </View>
-                {canSettle && (
-                  <TouchableOpacity
-                    onPress={() => {
-                      Theme.haptics.medium();
-                      setSettlementFrom(item.from);
-                      setSettlementTo(item.to);
-                      setSettlementAmount(item.amount.toFixed(0));
-                      setSettlementOutstanding(item.amount);
-                      setSettlementNotes("");
-                      setSettlementDate(new Date().toISOString().split("T")[0]);
-                      setIsSettleModalOpen(true);
-                    }}
-                    className="bg-[#14E5D4] px-4 py-2.5 rounded-xl active:opacity-90 shadow-md shadow-[#14E5D4]/20"
-                  >
-                    <Text className="text-[#0B1220] text-xs font-black">Settle</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            );
-          } else if (activeTab === "members") {
-            const isSelf = item.profile.id === user?.id;
-            const mAvatar = getGroupAvatarStyles(item.profile.username ? `@${item.profile.username}` : item.profile.display_name);
+              )}
+            </>
+          }
+          renderItem={({ item }) => {
+            if (activeTab === "expenses" || activeTab === "overview") {
+              const isPayer = item.paid_by === user?.id;
 
-            return (
-              <View className="bg-[#151E2E] border-[0.5px] border-white/5 p-4 rounded-2xl mb-3 shadow-md">
-                <View className="flex-row items-center mb-3">
-                  <View className={`w-10 h-10 border-[0.5px] justify-center items-center rounded-full mr-3 ${mAvatar.bgClass}`}>
-                    <Text className={`text-sm font-bold ${mAvatar.textClass}`}>{mAvatar.letter}</Text>
+              return (
+                <View className="bg-[#151E2E] border-[0.5px] border-white/5 p-4 rounded-2xl mb-3 shadow-md">
+                  <View className="flex-row items-center">
+                    <View className="w-10 h-10 justify-center items-center rounded-xl bg-white/5 mr-3">
+                      <Text className="text-base">
+                        {item.category?.icon_name === "shopping-cart"
+                          ? "🛒"
+                          : item.category?.icon_name === "utensils"
+                            ? "🍕"
+                            : item.category?.icon_name === "home"
+                              ? "🏠"
+                              : "💸"}
+                      </Text>
+                    </View>
+                    <View className="flex-1 mr-2">
+                      <Text className="text-white text-sm font-bold" numberOfLines={1}>
+                        {item.description}
+                      </Text>
+                      <Text className="text-[#94A3B8] text-[10px] mt-0.5" numberOfLines={1}>
+                        Paid by{" "}
+                        {item.payer?.username
+                          ? `@${item.payer.username}`
+                          : item.payer?.display_name || "Deleted User"}
+                      </Text>
+                    </View>
+                    <View className="items-end mr-3">
+                      <Text className="text-white font-bold text-sm">₹ {item.amount}</Text>
+                      <Text className="text-[#94A3B8] text-[9px] mt-0.5">
+                        {new Date(item.expense_date).toLocaleDateString()}
+                      </Text>
+                    </View>
+                    {isPayer && (
+                      <View className="flex-row space-x-1">
+                        <TouchableOpacity
+                          onPress={() => {
+                            Theme.haptics.light();
+                            router.push({
+                              pathname: "/groups/add-expense",
+                              params: { groupId: id, expenseId: item.id },
+                            });
+                          }}
+                          className="p-2 rounded-lg bg-white/5 mr-1 active:opacity-80 border-[0.5px] border-white/10"
+                        >
+                          <Text className="text-[#14E5D4] text-[9px] font-bold">Edit</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => {
+                            Theme.haptics.medium();
+                            deleteExpenseMutation.mutate(item.id);
+                          }}
+                          className="p-2 rounded-lg bg-white/5 active:opacity-80 border-[0.5px] border-white/10"
+                        >
+                          <Text className="text-[#EF4444] text-[9px] font-bold">Del</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+                </View>
+              );
+            } else if (activeTab === "settlements") {
+              const recipient = item.splits?.[0]?.debtor;
+              const settlementsList = expenses?.filter((e: any) => e.is_settlement) || [];
+              const isLatest = settlementsList.length > 0 && settlementsList[0].id === item.id;
+
+              return (
+                <View className="bg-[#151E2E] border-[0.5px] border-white/5 p-4 rounded-2xl mb-3 shadow-md">
+                  <View className="flex-row items-center justify-between">
+                    <View className="flex-row items-center flex-1 mr-2">
+                      <View className="w-8 h-8 justify-center items-center rounded-lg bg-[#22C55E]/10 mr-2.5">
+                        <Text className="text-base">🤝</Text>
+                      </View>
+                      <View className="flex-1">
+                        <Text className="text-white text-sm font-bold" numberOfLines={1}>
+                          {item.payer?.username
+                            ? `@${item.payer.username}`
+                            : item.payer?.display_name || "Someone"}{" "}
+                          paid{" "}
+                          {recipient?.username
+                            ? `@${recipient.username}`
+                            : recipient?.display_name || "Someone"}
+                        </Text>
+                        {item.notes ? (
+                          <Text className="text-[#94A3B8] text-[10px] mt-0.5 italic">
+                            "{item.notes}"
+                          </Text>
+                        ) : null}
+                        <Text className="text-[#94A3B8] text-[9px] mt-1">
+                          {new Date(item.expense_date).toLocaleDateString()} •{" "}
+                          {new Date(item.expense_date).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </Text>
+                      </View>
+                    </View>
+                    <View className="items-end justify-center">
+                      <Text className="text-[#22C55E] font-extrabold text-sm">₹ {item.amount}</Text>
+                      {isLatest && (
+                        <TouchableOpacity
+                          onPress={() => {
+                            Theme.haptics.medium();
+                            deleteExpenseMutation.mutate(item.id);
+                          }}
+                          style={{
+                            marginTop: 6,
+                            backgroundColor: "rgba(239, 68, 68, 0.1)",
+                            borderColor: "rgba(239, 68, 68, 0.2)",
+                            borderWidth: 0.5,
+                            borderRadius: 8,
+                            paddingHorizontal: 8,
+                            paddingVertical: 4,
+                          }}
+                          className="active:opacity-85"
+                        >
+                          <Text style={{ color: "#EF4444", fontSize: 9, fontWeight: "800" }}>
+                            Delete
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  </View>
+                </View>
+              );
+            } else if (activeTab === "balances") {
+              const fromMember = members?.find((m: any) => m.profile.id === item.from)?.profile;
+              const toMember = members?.find((m: any) => m.profile.id === item.to)?.profile;
+              const canSettle = item.from === user?.id || item.to === user?.id;
+
+              return (
+                <View className="flex-row items-center justify-between bg-[#151E2E] border-[0.5px] border-white/5 p-4 rounded-2xl mb-3 shadow-md">
+                  <View className="flex-1 mr-3">
+                    <Text className="text-white text-sm font-semibold">
+                      {fromMember?.id === user?.id
+                        ? `To Pay: ${toMember?.username ? `@${toMember.username}` : toMember?.display_name || "Someone"}`
+                        : toMember?.id === user?.id
+                          ? `${fromMember?.username ? `@${fromMember.username}` : fromMember?.display_name || "Someone"} to pay you`
+                          : `${fromMember?.username ? `@${fromMember.username}` : fromMember?.display_name || "Someone"} owes ${toMember?.username ? `@${toMember.username}` : toMember?.display_name || "Someone"}`}
+                    </Text>
+                    <Text
+                      className={`text-xs mt-1 font-bold ${
+                        fromMember?.id === user?.id
+                          ? "text-[#EF4444]"
+                          : toMember?.id === user?.id
+                            ? "text-[#22C55E]"
+                            : "text-[#94A3B8]"
+                      }`}
+                    >
+                      ₹ {item.amount.toFixed(0)}
+                    </Text>
+                  </View>
+                  {canSettle && (
+                    <TouchableOpacity
+                      onPress={() => {
+                        Theme.haptics.medium();
+                        setSettlementFrom(item.from);
+                        setSettlementTo(item.to);
+                        setSettlementAmount(item.amount.toFixed(0));
+                        setSettlementOutstanding(item.amount);
+                        setSettlementNotes("");
+                        setSettlementDate(new Date().toISOString().split("T")[0]);
+                        setIsSettleModalOpen(true);
+                      }}
+                      className="bg-[#14E5D4] px-4 py-2.5 rounded-xl active:opacity-90 shadow-md shadow-[#14E5D4]/20"
+                    >
+                      <Text className="text-[#0B1220] text-xs font-black">Settle</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              );
+            } else if (activeTab === "members") {
+              const isSelf = item.profile.id === user?.id;
+              const mAvatar = getGroupAvatarStyles(
+                item.profile.username ? `@${item.profile.username}` : item.profile.display_name
+              );
+
+              return (
+                <View className="bg-[#151E2E] border-[0.5px] border-white/5 p-4 rounded-2xl mb-3 shadow-md">
+                  <View className="flex-row items-center mb-3">
+                    <View
+                      className={`w-10 h-10 border-[0.5px] justify-center items-center rounded-full mr-3 ${mAvatar.bgClass}`}
+                    >
+                      <Text className={`text-sm font-bold ${mAvatar.textClass}`}>
+                        {mAvatar.letter}
+                      </Text>
+                    </View>
+                    <View className="flex-1">
+                      <Text className="text-white text-sm font-bold">
+                        {item.profile.username
+                          ? `@${item.profile.username}`
+                          : item.profile.display_name}
+                      </Text>
+                      {item.profile.username && (
+                        <Text className="text-[#94A3B8] text-[10px] mt-0.5">
+                          {item.profile.display_name}
+                        </Text>
+                      )}
+                      <Text className="text-[#94A3B8] text-[9px] mt-0.5">
+                        Joined:{" "}
+                        {new Date(item.joined_at).toLocaleDateString("en-IN", {
+                          day: "numeric",
+                          month: "short",
+                          year: "numeric",
+                        })}
+                      </Text>
+                    </View>
+                  </View>
+                  <View className="flex-row items-center justify-end space-x-2">
+                    {group.created_by === item.profile.id && (
+                      <View className="bg-[#22C55E]/10 border-[0.5px] border-[#22C55E] px-2.5 py-1 rounded mr-1">
+                        <Text className="text-[#22C55E] text-[9px] font-bold">Owner</Text>
+                      </View>
+                    )}
+                    {item.role === "admin" && group.created_by !== item.profile.id && (
+                      <View className="bg-[#14E5D4]/10 border-[0.5px] border-[#14E5D4] px-2.5 py-1 rounded mr-1">
+                        <Text className="text-[#14E5D4] text-[9px] font-bold">Admin</Text>
+                      </View>
+                    )}
+
+                    {group.created_by === user?.id && !isSelf && (
+                      <TouchableOpacity
+                        onPress={() => {
+                          Theme.haptics.medium();
+                          transferOwnershipMutation.mutate(item.profile.id);
+                        }}
+                        className="p-2 bg-[#14E5D4]/10 rounded-xl border border-[#14E5D4]/20 active:scale-95 mr-1"
+                      >
+                        <Text className="text-[#14E5D4] text-[9px] font-bold">Make Owner</Text>
+                      </TouchableOpacity>
+                    )}
+
+                    {isAdmin && !isSelf && (
+                      <TouchableOpacity
+                        onPress={() => {
+                          Theme.haptics.medium();
+                          removeMemberMutation.mutate(item.profile.id);
+                        }}
+                        className="p-2 bg-white/5 rounded-xl border border-white/10 active:scale-95"
+                      >
+                        <UserMinus size={14} color="#EF4444" />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
+              );
+            } else if (activeTab === "activity") {
+              return (
+                <View className="flex-row bg-[#151E2E] border-[0.5px] border-white/5 p-4 rounded-2xl mb-3 items-center shadow-md">
+                  <View className="w-9 h-9 rounded-xl bg-white/5 justify-center items-center mr-3 border border-white/10">
+                    <Text className="text-base">{item.icon}</Text>
                   </View>
                   <View className="flex-1">
-                    <Text className="text-white text-sm font-bold">
-                      {item.profile.username ? `@${item.profile.username}` : item.profile.display_name}
-                    </Text>
-                    {item.profile.username && (
-                      <Text className="text-[#94A3B8] text-[10px] mt-0.5">{item.profile.display_name}</Text>
-                    )}
-                    <Text className="text-[#94A3B8] text-[9px] mt-0.5">Joined: {new Date(item.joined_at).toLocaleDateString("en-IN", { day: 'numeric', month: 'short', year: 'numeric' })}</Text>
+                    <Text className="text-white text-xs font-semibold">{item.title}</Text>
+                    <Text className="text-[#94A3B8] text-[9px] mt-0.5">{item.subtitle}</Text>
                   </View>
+                  <Text className="text-[#94A3B8] text-[9px] font-medium">
+                    {item.date.toLocaleDateString()}
+                  </Text>
                 </View>
-                <View className="flex-row items-center justify-end space-x-2">
-                  {group.created_by === item.profile.id && (
-                    <View className="bg-[#22C55E]/10 border-[0.5px] border-[#22C55E] px-2.5 py-1 rounded mr-1">
-                      <Text className="text-[#22C55E] text-[9px] font-bold">Owner</Text>
-                    </View>
-                  )}
-                  {item.role === "admin" && group.created_by !== item.profile.id && (
-                    <View className="bg-[#14E5D4]/10 border-[0.5px] border-[#14E5D4] px-2.5 py-1 rounded mr-1">
-                      <Text className="text-[#14E5D4] text-[9px] font-bold">Admin</Text>
-                    </View>
-                  )}
-                  
-                  {group.created_by === user?.id && !isSelf && (
-                    <TouchableOpacity
-                      onPress={() => {
-                        Theme.haptics.medium();
-                        transferOwnershipMutation.mutate(item.profile.id);
-                      }}
-                      className="p-2 bg-[#14E5D4]/10 rounded-xl border border-[#14E5D4]/20 active:scale-95 mr-1"
-                    >
-                      <Text className="text-[#14E5D4] text-[9px] font-bold">Make Owner</Text>
-                    </TouchableOpacity>
-                  )}
-                  
-                  {isAdmin && !isSelf && (
-                    <TouchableOpacity
-                      onPress={() => {
-                        Theme.haptics.medium();
-                        removeMemberMutation.mutate(item.profile.id);
-                      }}
-                      className="p-2 bg-white/5 rounded-xl border border-white/10 active:scale-95"
-                    >
-                      <UserMinus size={14} color="#EF4444" />
-                    </TouchableOpacity>
-                  )}
-                </View>
-              </View>
-            );
-          } else if (activeTab === "activity") {
-            return (
-              <View className="flex-row bg-[#151E2E] border-[0.5px] border-white/5 p-4 rounded-2xl mb-3 items-center shadow-md">
-                <View className="w-9 h-9 rounded-xl bg-white/5 justify-center items-center mr-3 border border-white/10">
-                  <Text className="text-base">{item.icon}</Text>
-                </View>
-                <View className="flex-1">
-                  <Text className="text-white text-xs font-semibold">{item.title}</Text>
-                  <Text className="text-[#94A3B8] text-[9px] mt-0.5">{item.subtitle}</Text>
-                </View>
-                <Text className="text-[#94A3B8] text-[9px] font-medium">
-                  {item.date.toLocaleDateString()}
+              );
+            }
+            return null;
+          }}
+          ListEmptyComponent={
+            activeTab !== "analytics" ? (
+              <View className="py-12 items-center justify-center px-4 bg-[#151E2E] rounded-2xl border-[0.5px] border-white/5 shadow-md">
+                <AlertCircle size={28} color="#94A3B8" className="mb-2" />
+                <Text className="text-white text-base font-bold text-center mb-1">
+                  {activeTab === "expenses"
+                    ? "No expenses yet"
+                    : activeTab === "balances"
+                      ? "All settled up!"
+                      : activeTab === "activity"
+                        ? "No activity logs"
+                        : "No members"}
+                </Text>
+                <Text className="text-[#94A3B8] text-xs text-center leading-relaxed">
+                  {activeTab === "expenses"
+                    ? "Tap the '+' button below to log your first shared expense."
+                    : activeTab === "balances"
+                      ? "Excellent work! Everyone in the group is squared away."
+                      : activeTab === "activity"
+                        ? "Your transaction actions timeline will populate here."
+                        : "Invite friends using the invite code above to split expenses."}
                 </Text>
               </View>
-            );
+            ) : null
           }
-          return null;
-        }}
-        ListEmptyComponent={
-          activeTab !== "analytics" ? (
-            <View className="py-12 items-center justify-center px-4 bg-[#151E2E] rounded-2xl border-[0.5px] border-white/5 shadow-md">
-              <AlertCircle size={28} color="#94A3B8" className="mb-2" />
-              <Text className="text-white text-base font-bold text-center mb-1">
-                {activeTab === "expenses"
-                  ? "No expenses yet"
-                  : activeTab === "balances"
-                  ? "All settled up!"
-                  : activeTab === "activity"
-                  ? "No activity logs"
-                  : "No members"}
-              </Text>
-              <Text className="text-[#94A3B8] text-xs text-center leading-relaxed">
-                {activeTab === "expenses"
-                  ? "Tap the '+' button below to log your first shared expense."
-                  : activeTab === "balances"
-                  ? "Excellent work! Everyone in the group is squared away."
-                  : activeTab === "activity"
-                  ? "Your transaction actions timeline will populate here."
-                  : "Invite friends using the invite code above to split expenses."}
-              </Text>
-            </View>
-          ) : null
-        }
-      />
+        />
 
-      {/* Floating Action Button (Always easy to find!) */}
-      {true && (
-        <TouchableOpacity
-          onPress={() => {
-            Theme.haptics.light();
-            router.push({
-              pathname: "/groups/add-expense",
-              params: { groupId: id },
-            });
-          }}
-          style={{
-            position: "absolute",
-            bottom: 24,
-            right: 24,
-            shadowColor: "#14E5D4",
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.3,
-            shadowRadius: 10,
-            elevation: 8,
-          }}
-          className="w-14 h-14 bg-[#14E5D4] rounded-full justify-center items-center active:scale-95 z-40"
-        >
-          <Plus size={28} color="#0B1220" />
-        </TouchableOpacity>
-      )}
+        {/* Floating Action Button (Always easy to find!) */}
+        {true && (
+          <TouchableOpacity
+            onPress={() => {
+              Theme.haptics.light();
+              router.push({
+                pathname: "/groups/add-expense",
+                params: { groupId: id },
+              });
+            }}
+            style={{
+              position: "absolute",
+              bottom: 24,
+              right: 24,
+              shadowColor: "#14E5D4",
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.3,
+              shadowRadius: 10,
+              elevation: 8,
+            }}
+            className="w-14 h-14 bg-[#14E5D4] rounded-full justify-center items-center active:scale-95 z-40"
+          >
+            <Plus size={28} color="#0B1220" />
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Settings Modal */}
@@ -1251,7 +1407,9 @@ export default function GroupDetail() {
 
             <View className="space-y-4">
               <View>
-                <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-2">Group Name</Text>
+                <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-2">
+                  Group Name
+                </Text>
                 <Controller
                   control={control}
                   name="name"
@@ -1266,11 +1424,15 @@ export default function GroupDetail() {
                     />
                   )}
                 />
-                {errors.name && <Text className="text-[#EF4444] text-xs mt-1">{errors.name.message}</Text>}
+                {errors.name && (
+                  <Text className="text-[#EF4444] text-xs mt-1">{errors.name.message}</Text>
+                )}
               </View>
 
               <View className="mt-4">
-                <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-2">Description (Optional)</Text>
+                <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-2">
+                  Description (Optional)
+                </Text>
                 <Controller
                   control={control}
                   name="description"
@@ -1337,20 +1499,26 @@ export default function GroupDetail() {
             <View className="space-y-4">
               {/* From / To summary */}
               {(() => {
-                const fromProfile = members?.find((m: any) => m.profile.id === settlementFrom)?.profile;
+                const fromProfile = members?.find(
+                  (m: any) => m.profile.id === settlementFrom
+                )?.profile;
                 const toProfile = members?.find((m: any) => m.profile.id === settlementTo)?.profile;
                 return (
                   <View className="bg-white/5 border border-white/10 rounded-xl p-3.5 space-y-2">
                     <View className="flex-row justify-between items-center">
                       <Text className="text-[#94A3B8] text-xs">Payer (From):</Text>
                       <Text className="text-white text-xs font-bold">
-                        {fromProfile?.username ? `@${fromProfile.username}` : fromProfile?.display_name || "Someone"}
+                        {fromProfile?.username
+                          ? `@${fromProfile.username}`
+                          : fromProfile?.display_name || "Someone"}
                       </Text>
                     </View>
                     <View className="flex-row justify-between items-center pt-2 border-t border-white/5">
                       <Text className="text-[#94A3B8] text-xs">Receiver (To):</Text>
                       <Text className="text-white text-xs font-bold">
-                        {toProfile?.username ? `@${toProfile.username}` : toProfile?.display_name || "Someone"}
+                        {toProfile?.username
+                          ? `@${toProfile.username}`
+                          : toProfile?.display_name || "Someone"}
                       </Text>
                     </View>
                     <View className="flex-row justify-between items-center pt-2 border-t border-white/5">
@@ -1416,7 +1584,10 @@ export default function GroupDetail() {
                     return;
                   }
                   if (amt > settlementOutstanding + 0.01) {
-                    showToast(`Amount cannot exceed the outstanding balance of ₹${settlementOutstanding.toFixed(0)}`, "error");
+                    showToast(
+                      `Amount cannot exceed the outstanding balance of ₹${settlementOutstanding.toFixed(0)}`,
+                      "error"
+                    );
                     return;
                   }
                   settleMutation.mutate({
