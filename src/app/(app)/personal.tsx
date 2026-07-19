@@ -17,6 +17,7 @@ import { useAuthStore } from "../../store/authStore";
 import { supabase } from "../../services/supabase";
 import { useToastStore } from "../../store/toastStore";
 import { Theme } from "../../constants/Theme";
+import { triggerWittyNotification } from "../../services/wittyNotifications";
 import {
   ChevronLeft,
   Plus,
@@ -46,20 +47,13 @@ const taglines = [
   "Kharcha kam, savings zyada."
 ];
 
-const successMessages = [
-  "Kharcha added 😅",
-  "Wallet crying... entry saved.",
-  "Another expense? Rich people problems 😂",
-  "Hisaab updated successfully.",
-  "Future you says thanks 🙌"
-];
+// Cleaned up local successMessages in favor of centralized witty notifications
 
 const getCategoryEmoji = (catName: string) => {
   const name = catName.toLowerCase();
   if (name.includes("food") || name.includes("eat") || name.includes("restaurant") || name.includes("utensil")) return "🍕";
   if (name.includes("rent") || name.includes("home") || name.includes("flat") || name.includes("room")) return "🏠";
   if (name.includes("travel") || name.includes("cab") || name.includes("ride") || name.includes("auto") || name.includes("fuel")) return "🚗";
-  if (name.includes("water")) return "💧";
   if (name.includes("tiffin")) return "🍱";
   if (name.includes("shopping") || name.includes("clothes") || name.includes("grocer")) return "🛒";
   if (name.includes("bill") || name.includes("recharge") || name.includes("electricity")) return "⚡";
@@ -219,11 +213,7 @@ export default function PersonalExpenses() {
     onSuccess: () => {
       Theme.haptics.success();
       queryClient.invalidateQueries({ queryKey: ["personal-expenses", user?.id] });
-      const randomMsg = successMessages[Math.floor(Math.random() * successMessages.length)];
-      showToast(
-        editingExpense ? "Expense updated successfully" : randomMsg,
-        "success"
-      );
+      triggerWittyNotification(editingExpense ? "expense_updated" : "expense_added", editingExpense ? "Expense Updated" : "Expense Added");
       setIsOpen(false);
       reset();
     },
@@ -241,7 +231,7 @@ export default function PersonalExpenses() {
     onSuccess: () => {
       Theme.haptics.success();
       queryClient.invalidateQueries({ queryKey: ["personal-expenses", user?.id] });
-      showToast("Expense deleted successfully", "success");
+      triggerWittyNotification("expense_deleted", "Expense Deleted");
       setIsOpen(false);
       setIsActionMenuOpen(false);
     },
@@ -264,7 +254,7 @@ export default function PersonalExpenses() {
       showToast("Failed to duplicate expense", "error");
     } else {
       queryClient.invalidateQueries({ queryKey: ["personal-expenses", user?.id] });
-      showToast("Expense duplicated!", "success");
+      triggerWittyNotification("expense_added", "Expense Duplicated");
     }
     setIsActionMenuOpen(false);
   };
@@ -466,90 +456,25 @@ export default function PersonalExpenses() {
           <View className="w-8" />
         </View>
 
-        {/* 2X2 SUMMARY STATS CARDS */}
-        <View className="flex-row flex-wrap gap-3 mb-6">
-          {/* Card 1: Spent this month */}
-          <View className="w-[48%] bg-[#151E2E] border-[0.5px] border-white/5 p-4 rounded-2xl shadow-lg flex-col justify-between">
+        {/* Monthly Spending Banner */}
+        <View className="bg-[#151E2E] border-[0.5px] border-white/5 p-6 rounded-2xl mb-6 shadow-xl">
+          <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest">Monthly Spending</Text>
+          <Text className="text-[#14E5D4] text-3xl font-black mt-2">
+            {formatRupees(dashboardStats.monthlyTotal)}
+          </Text>
+          <View className="flex-row justify-between mt-4 pt-4 border-t border-white/5">
             <View>
-              <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-wider">Spent This Month</Text>
-              <Text className="text-[#94A3B8] text-[9px] mt-0.5 mb-1.5">Current billing cycle</Text>
+              <Text className="text-[#94A3B8] text-[9px] uppercase tracking-wider">Spent Today</Text>
+              <Text className="text-white text-sm font-bold mt-1">{formatRupees(dashboardStats.todayTotal)}</Text>
             </View>
-            <Text className="text-[#14E5D4] text-2xl font-black">{formatRupees(dashboardStats.monthlyTotal)}</Text>
-          </View>
-
-          {/* Card 2: Today's spending */}
-          <View className="w-[48%] bg-[#151E2E] border-[0.5px] border-white/5 p-4 rounded-2xl shadow-lg flex-col justify-between">
-            <View>
-              <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-wider">Today's Spending</Text>
-              <Text className="text-[#94A3B8] text-[9px] mt-0.5 mb-1.5">Spent today</Text>
+            <View className="items-center">
+              <Text className="text-[#94A3B8] text-[9px] uppercase tracking-wider">Weekly Spent</Text>
+              <Text className="text-white text-sm font-bold mt-1">{formatRupees(dashboardStats.weeklyTotal)}</Text>
             </View>
-            <Text className="text-white text-2xl font-black">{formatRupees(dashboardStats.todayTotal)}</Text>
-          </View>
-
-          {/* Card 3: Total Transactions */}
-          <View className="w-[48%] bg-[#151E2E] border-[0.5px] border-white/5 p-4 rounded-2xl shadow-lg flex-col justify-between">
-            <View>
-              <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-wider">Transactions</Text>
-              <Text className="text-[#94A3B8] text-[9px] mt-0.5 mb-1.5">All-time count</Text>
+            <View className="items-end">
+              <Text className="text-[#94A3B8] text-[9px] uppercase tracking-wider">Transactions</Text>
+              <Text className="text-white text-sm font-bold mt-1">{dashboardStats.totalTransactions}</Text>
             </View>
-            <Text className="text-[#94A3B8] text-2xl font-black">{dashboardStats.totalTransactions}</Text>
-          </View>
-
-          {/* Card 4: Biggest Expense */}
-          <View className="w-[48%] bg-[#151E2E] border-[0.5px] border-white/5 p-4 rounded-2xl shadow-lg flex-col justify-between">
-            <View>
-              <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-wider">Biggest Expense</Text>
-              <Text className="text-[#94A3B8] text-[9px] mt-0.5 mb-1.5">Peak single cost</Text>
-            </View>
-            <Text className="text-[#EF4444] text-2xl font-black">{formatRupees(dashboardStats.biggestExpense)}</Text>
-          </View>
-        </View>
-
-        {/* QUICK STATS PANEL */}
-        <View className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-4 mb-6 shadow-md">
-          <Text className="text-[#94A3B8] text-[10px] font-bold uppercase tracking-wider mb-3">Quick Stats</Text>
-          <View className="flex-row justify-between flex-wrap gap-y-2">
-            <View className="w-[48%]">
-              <Text className="text-[#94A3B8] text-[9px]">Daily Average</Text>
-              <Text className="text-white text-sm font-bold mt-0.5">{formatRupees(Math.round(dashboardStats.dailyAverage))}</Text>
-            </View>
-            <View className="w-[48%]">
-              <Text className="text-[#94A3B8] text-[9px]">This Week</Text>
-              <Text className="text-white text-sm font-bold mt-0.5">{formatRupees(dashboardStats.weeklyTotal)}</Text>
-            </View>
-            {dashboardStats.moneyLeft !== null && (
-              <View className="w-[48%] mt-2">
-                <Text className="text-[#94A3B8] text-[9px]">Money Left (Budget)</Text>
-                <Text className={`text-sm font-bold mt-0.5 ${dashboardStats.moneyLeft < 0 ? "text-[#EF4444]" : "text-[#22C55E]"}`}>
-                  {formatRupees(dashboardStats.moneyLeft)}
-                </Text>
-              </View>
-            )}
-          </View>
-        </View>
-
-        {/* QUICK ADD SECTION */}
-        <View className="mb-6 bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-4 shadow-md">
-          <Text className="text-white text-sm font-black mb-0.5">Quick Add</Text>
-          <Text className="text-[#94A3B8] text-[9px] mb-3">Daily kharcha, one tap away ☕</Text>
-          <View className="flex-row space-x-3.5 gap-2.5">
-            <TouchableOpacity
-              onPress={() => handleQuickAdd("tea")}
-              className="flex-row items-center bg-white/5 border border-white/10 px-4 py-2.5 rounded-full active:scale-95 shadow-sm"
-            >
-              <Text className="text-sm mr-1.5">☕</Text>
-              <Text className="text-white text-xs font-bold mr-1.5">Tea</Text>
-              <Text className="text-[#14E5D4] text-xs font-black">₹10</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() => handleQuickAdd("biscuit")}
-              className="flex-row items-center bg-white/5 border border-white/10 px-4 py-2.5 rounded-full active:scale-95 shadow-sm"
-            >
-              <Text className="text-sm mr-1.5">🍪</Text>
-              <Text className="text-white text-xs font-bold mr-1.5">Biscuit</Text>
-              <Text className="text-[#14E5D4] text-xs font-black">₹5</Text>
-            </TouchableOpacity>
           </View>
         </View>
 

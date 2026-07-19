@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, ActivityIndicator } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, Image } from "react-native";
 import { useRouter, Link } from "expo-router";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -66,10 +66,15 @@ export default function ForgotPassword() {
         </Link>
       </View>
 
-      <View className="items-center mb-10">
-        <Text className="text-5xl font-black text-white tracking-tighter">Hisab</Text>
+      <View className="items-center mb-8">
+        <Image
+          source={require("../../../assets/images/logo.png")}
+          style={{ width: 100, height: 100, borderRadius: 24, marginBottom: 16 }}
+          resizeMode="contain"
+        />
+        <Text className="text-5xl font-black text-white tracking-tighter">hiSaab</Text>
         <Text className="text-accentCyan text-xs font-bold uppercase tracking-widest mt-2">
-          No more "Bhai, kitna dena hai?"
+          Keep the hisaab clear.
         </Text>
       </View>
 

@@ -17,6 +17,7 @@ import { supabase } from "../../services/supabase";
 import { useToastStore } from "../../store/toastStore";
 import { Theme } from "../../constants/Theme";
 import { Colors } from "../../constants/Colors";
+import { triggerWittyNotification } from "../../services/wittyNotifications";
 import {
   ChevronLeft,
   Coffee,
@@ -184,7 +185,7 @@ export default function TiffinTracker() {
     onSuccess: () => {
       Theme.haptics.success();
       queryClient.invalidateQueries({ queryKey: ["tiffin-logs-month", user?.id, currentYear, currentMonth] });
-      showToast("Meal entry updated", "success");
+      triggerWittyNotification("tiffin_logged", "Tiffin Logged");
     },
     onError: (error: any) => {
       Theme.haptics.error();
@@ -403,45 +404,28 @@ export default function TiffinTracker() {
           </View>
         )}
 
-        {/* 2X2 METRICS GRID SUMMARY */}
-        <View className="flex-row flex-wrap mt-6 gap-3">
-          {/* Card 1: Today's status */}
-          <View className="w-[48%] bg-[#151E2E] border-[0.5px] border-white/5 p-4 rounded-2xl shadow-lg flex-col justify-between">
+        {/* Prominent Tiffin Summary Banner */}
+        <View className="bg-[#151E2E] border-[0.5px] border-white/5 p-5 rounded-2xl mt-6 shadow-xl">
+          <Text className="text-[#94A3B8] text-[10px] font-bold uppercase tracking-widest">This Month Bill</Text>
+          <Text className="text-[#14E5D4] text-3xl font-black mt-1.5">{formatRupees(stats.totalBill)}</Text>
+          
+          <View className="flex-row justify-between mt-4 pt-4 border-t border-white/5">
             <View>
-              <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-wider">Today's Meals</Text>
-              <Text className="text-[#94A3B8] text-[9px] mt-0.5 mb-1.5">Logs recorded today</Text>
+              <Text className="text-[#94A3B8] text-[8px] uppercase tracking-wider">Today's Meals</Text>
+              <Text className="text-white text-xs font-bold mt-1">{todayMealsCount} / 2</Text>
             </View>
-            <View className="flex-row items-baseline">
-              <Text className="text-white text-2xl font-black">{todayMealsCount}</Text>
-              <Text className="text-[#94A3B8] text-xs font-bold ml-1">/ 2</Text>
+            <View className="items-center">
+              <Text className="text-[#94A3B8] text-[8px] uppercase tracking-wider">Breakfasts</Text>
+              <Text className="text-white text-xs font-bold mt-1">{stats.breakfasts}</Text>
             </View>
-          </View>
-
-          {/* Card 2: Meals This Month */}
-          <View className="w-[48%] bg-[#151E2E] border-[0.5px] border-white/5 p-4 rounded-2xl shadow-lg flex-col justify-between">
-            <View>
-              <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-wider">Meals This Month</Text>
-              <Text className="text-[#94A3B8] text-[9px] mt-0.5 mb-1.5">Total meals consumed</Text>
+            <View className="items-center">
+              <Text className="text-[#94A3B8] text-[8px] uppercase tracking-wider">Dinners</Text>
+              <Text className="text-white text-xs font-bold mt-1">{stats.dinners}</Text>
             </View>
-            <Text className="text-white text-2xl font-black">{stats.totalMeals}</Text>
-          </View>
-
-          {/* Card 3: Current Bill estimate */}
-          <View className="w-[48%] bg-[#151E2E] border-[0.5px] border-white/5 p-4 rounded-2xl shadow-lg flex-col justify-between">
-            <View>
-              <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-wider">Current Bill</Text>
-              <Text className="text-[#94A3B8] text-[9px] mt-0.5 mb-1.5">Estimated month cost</Text>
+            <View className="items-end">
+              <Text className="text-[#94A3B8] text-[8px] uppercase tracking-wider">Money Saved</Text>
+              <Text className="text-[#22C55E] text-xs font-bold mt-1">{formatRupees(stats.moneySaved)}</Text>
             </View>
-            <Text className="text-[#14E5D4] text-2xl font-black">{formatRupees(stats.totalBill)}</Text>
-          </View>
-
-          {/* Card 4: Money Saved */}
-          <View className="w-[48%] bg-[#151E2E] border-[0.5px] border-white/5 p-4 rounded-2xl shadow-lg flex-col justify-between">
-            <View>
-              <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-wider">Money Saved</Text>
-              <Text className="text-[#94A3B8] text-[9px] mt-0.5 mb-1.5">Saved from skipped meals</Text>
-            </View>
-            <Text className="text-[#22C55E] text-2xl font-black">{formatRupees(stats.moneySaved)}</Text>
           </View>
         </View>
 

@@ -11,6 +11,7 @@ import {
   Modal,
   ScrollView,
   RefreshControl,
+  Share,
 } from "react-native";
 import { useLocalSearchParams, useRouter, Link } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -20,6 +21,7 @@ import { useToastStore } from "../../../store/toastStore";
 import { Theme } from "../../../constants/Theme";
 import { Colors } from "../../../constants/Colors";
 import * as Clipboard from "expo-clipboard";
+import { triggerWittyNotification } from "../../../services/wittyNotifications";
 import {
   ChevronLeft,
   Copy,
@@ -35,10 +37,11 @@ import {
   Users2,
   Landmark,
   Plus,
-  Droplet,
   ChevronRight,
   UserMinus,
-  AlertCircle
+  AlertCircle,
+  Share2,
+  RefreshCw,
 } from "lucide-react-native";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -64,8 +67,9 @@ export default function GroupDetail() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isLeaving, setIsLeaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<"expenses" | "balances" | "members" | "activity" | "analytics" | "settlements">((tab as any) || "expenses");
+  const [activeTab, setActiveTab] = useState<"overview" | "expenses" | "balances" | "members" | "activity" | "analytics" | "settlements">((tab as any) || "overview");
   const [simplifyDebtsEnabled, setSimplifyDebtsEnabled] = useState(true);
+  const [isRegenerating, setIsRegenerating] = useState(false);
 
   // Settle Modal fields
   const [isSettleModalOpen, setIsSettleModalOpen] = useState(false);
@@ -185,7 +189,7 @@ export default function GroupDetail() {
       queryClient.invalidateQueries({ queryKey: ["dashboard-peer-balances"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-personal-expenses"] });
       queryClient.invalidateQueries({ queryKey: ["groups"] });
-      showToast("Settlement recorded successfully", "success");
+      triggerWittyNotification("settlement_completed", "Settlement Done");
       setIsSettleModalOpen(false);
     },
     onError: (error: any) => {
@@ -226,7 +230,7 @@ export default function GroupDetail() {
       Theme.haptics.success();
       queryClient.invalidateQueries({ queryKey: ["group-expenses", id] });
       queryClient.invalidateQueries({ queryKey: ["peer-balances", id] });
-      showToast("Settlement confirmed and balances updated", "success");
+      triggerWittyNotification("settlement_completed", "Settlement Confirmed");
     },
     onError: (error: any) => {
       Theme.haptics.error();
@@ -244,7 +248,7 @@ export default function GroupDetail() {
       Theme.haptics.success();
       queryClient.invalidateQueries({ queryKey: ["group-expenses", id] });
       queryClient.invalidateQueries({ queryKey: ["peer-balances", id] });
-      showToast("Expense deleted successfully", "success");
+      triggerWittyNotification("expense_deleted", "Expense Deleted");
     },
     onError: (error: any) => {
       Theme.haptics.error();
@@ -575,12 +579,12 @@ export default function GroupDetail() {
   }
 
   // Active list dataset
-  const listData = activeTab === "expenses"
+  const listData = activeTab === "overview"
+    ? (expenses?.filter((e: any) => !e.is_settlement).slice(0, 3) || [])
+    : activeTab === "expenses"
     ? expenses?.filter((e: any) => !e.is_settlement)
     : activeTab === "balances"
     ? (simplifyDebtsEnabled ? simplifiedDebts : rawDebts)
-    : activeTab === "settlements"
-    ? expenses?.filter((e: any) => e.is_settlement)
     : activeTab === "members"
     ? members
     : activeTab === "activity"
@@ -614,7 +618,8 @@ export default function GroupDetail() {
         </TouchableOpacity>
       </View>
 
-      <FlatList
+      <View style={{ flex: 1, position: "relative" }}>
+        <FlatList
         data={listData}
         keyExtractor={(item, index) => item.id || item.profile?.id || `${item.from}-${item.to}-${index}`}
         contentContainerStyle={{ padding: 24, paddingBottom: 100 }}
@@ -646,23 +651,10 @@ export default function GroupDetail() {
                   </Text>
                 </View>
               </View>
-              {/* Water Tracker Link */}
-              <TouchableOpacity
-                onPress={() => {
-                  Theme.haptics.light();
-                  router.push({
-                    pathname: "/groups/water",
-                    params: { groupId: id },
-                  });
-                }}
-                className="w-9 h-9 justify-center items-center rounded-xl bg-white/5 border-[0.5px] border-white/10"
-              >
-                <Droplet size={18} color={Colors.accentCyan} />
-              </TouchableOpacity>
             </View>
 
             {/* Quick Stats Header widget */}
-            {activeTab === "expenses" && expenses && expenses.filter((e: any) => !e.is_settlement).length > 0 && (
+            {activeTab === "overview" && expenses && expenses.filter((e: any) => !e.is_settlement).length > 0 && (
               <View className="bg-[#151E2E]/60 border-[0.5px] border-white/5 rounded-2xl p-4 mb-6 flex-row justify-between shadow-md">
                 <View className="flex-grow flex-shrink">
                   <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-wider mb-1">Group Spent</Text>
@@ -694,7 +686,7 @@ export default function GroupDetail() {
             )}
 
             {/* Recent Activity widget */}
-            {activeTab === "expenses" && activityList.length > 0 && (
+            {activeTab === "overview" && activityList.length > 0 && (
               <View className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-4 mb-6 shadow-md">
                 <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-wider mb-2">Recent Activity</Text>
                 <View className="flex-row items-center">
@@ -712,7 +704,7 @@ export default function GroupDetail() {
             {/* Custom Tab Switcher */}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-6">
               <View className="flex-row bg-[#151E2E] border-[0.5px] border-white/5 rounded-xl p-1 shadow-md">
-                {(["expenses", "balances", "settlements", "members", "activity", "analytics"] as const).map((tab) => (
+                {(["overview", "expenses", "balances", "members", "activity"] as const).map((tab) => (
                   <TouchableOpacity
                     key={tab}
                     onPress={() => {
@@ -728,12 +720,16 @@ export default function GroupDetail() {
                         activeTab === tab ? "text-[#14E5D4]" : "text-[#94A3B8]"
                       }`}
                     >
-                      {tab === "settlements" ? "Settlements" : tab}
+                      {tab}
                     </Text>
                   </TouchableOpacity>
                 ))}
               </View>
             </ScrollView>
+
+            {activeTab === "overview" && listData.length > 0 && (
+              <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-wider mb-3">Recent Group Expenses</Text>
+            )}
 
             {/* Inline Net Balances Grid shown in Balances Tab */}
             {activeTab === "balances" && (
@@ -793,22 +789,88 @@ export default function GroupDetail() {
               </View>
             )}
 
-            {/* Invite card in Members Tab */}
+            {/* Invite Friends Card in Members Tab */}
             {activeTab === "members" && (
               <View className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-5 mb-6 shadow-lg">
-                <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-2">
-                  Share Invite Code
+                <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-3">
+                  Invite Friends
                 </Text>
-                <View className="flex-row items-center bg-white/5 border-[0.5px] border-white/10 rounded-xl p-3">
-                  <Text className="text-white font-mono text-xs flex-1 select-all mr-2" numberOfLines={1}>
-                    {group.id}
+
+                {/* Invite Code Display */}
+                <View className="items-center bg-white/5 border-[0.5px] border-white/10 rounded-xl p-4 mb-4">
+                  <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-widest mb-1">Invite Code</Text>
+                  <Text className="text-white text-2xl font-black tracking-[5px]">
+                    {group.invite_code || "—"}
                   </Text>
+                </View>
+
+                {/* Action Buttons Row */}
+                <View className="flex-row gap-2">
+                  {/* Copy */}
                   <TouchableOpacity
-                    onPress={handleCopyInvite}
-                    className="bg-accentCyan w-8 h-8 justify-center items-center rounded-lg"
+                    onPress={async () => {
+                      Theme.haptics.light();
+                      const code = group.invite_code || group.id;
+                      await Clipboard.setStringAsync(code);
+                      showToast("Invite code copied.", "success");
+                    }}
+                    className="flex-1 flex-row items-center justify-center bg-white/5 border-[0.5px] border-white/10 py-3 rounded-xl active:scale-95"
                   >
-                    <Copy size={14} color="#0D0D0D" />
+                    <Copy size={14} color="#14E5D4" />
+                    <Text className="text-white text-xs font-bold ml-1.5">Copy</Text>
                   </TouchableOpacity>
+
+                  {/* Share */}
+                  <TouchableOpacity
+                    onPress={async () => {
+                      Theme.haptics.light();
+                      const code = group.invite_code || group.id;
+                      try {
+                        await Share.share({
+                          title: `Join ${group.name} on hiSaab`,
+                          message: `Join my hiSaab group!\n\nGroup:\n${group.name}\n\nInvite Code:\n${code}\n\nSee you inside 👋`,
+                        });
+                      } catch {}
+                    }}
+                    className="flex-1 flex-row items-center justify-center bg-white/5 border-[0.5px] border-white/10 py-3 rounded-xl active:scale-95"
+                  >
+                    <Share2 size={14} color="#14E5D4" />
+                    <Text className="text-white text-xs font-bold ml-1.5">Share</Text>
+                  </TouchableOpacity>
+
+                  {/* Regenerate (admin only) */}
+                  {group.created_by === user?.id && (
+                    <TouchableOpacity
+                      onPress={async () => {
+                        Theme.haptics.light();
+                        setIsRegenerating(true);
+                        try {
+                          const { data, error } = await supabase.rpc("regenerate_invite_code", {
+                            p_group_id: id,
+                            p_user_id: user?.id,
+                          });
+                          if (error) throw error;
+                          queryClient.invalidateQueries({ queryKey: ["group", id] });
+                          showToast("Invite code regenerated.", "success");
+                        } catch (e: any) {
+                          showToast(e.message || "Failed to regenerate code", "error");
+                        } finally {
+                          setIsRegenerating(false);
+                        }
+                      }}
+                      disabled={isRegenerating}
+                      className="flex-1 flex-row items-center justify-center bg-white/5 border-[0.5px] border-white/10 py-3 rounded-xl active:scale-95"
+                    >
+                      {isRegenerating ? (
+                        <ActivityIndicator size="small" color="#14E5D4" />
+                      ) : (
+                        <>
+                          <RefreshCw size={14} color="#F59E0B" />
+                          <Text className="text-white text-xs font-bold ml-1.5">New Code</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  )}
                 </View>
               </View>
             )}
@@ -888,7 +950,7 @@ export default function GroupDetail() {
           </>
         }
         renderItem={({ item }) => {
-          if (activeTab === "expenses") {
+          if (activeTab === "expenses" || activeTab === "overview") {
             const isPayer = item.paid_by === user?.id;
 
             return (
@@ -1146,8 +1208,8 @@ export default function GroupDetail() {
         }
       />
 
-      {/* Floating Action Button (Only on Expenses Tab) */}
-      {activeTab === "expenses" && (
+      {/* Floating Action Button (Always easy to find!) */}
+      {true && (
         <TouchableOpacity
           onPress={() => {
             Theme.haptics.light();
@@ -1171,6 +1233,7 @@ export default function GroupDetail() {
           <Plus size={28} color="#0B1220" />
         </TouchableOpacity>
       )}
+      </View>
 
       {/* Settings Modal */}
       <Modal visible={isSettingsOpen} animationType="slide" transparent>

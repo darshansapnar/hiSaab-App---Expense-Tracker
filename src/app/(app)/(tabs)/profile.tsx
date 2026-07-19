@@ -386,7 +386,7 @@ export default function Profile() {
       color: "#FBBF24",
       onPress: () => {
         Theme.haptics.light();
-        showToast("Notification settings coming soon", "info");
+        router.push("/profile/notifications");
       },
     },
     {
@@ -395,7 +395,7 @@ export default function Profile() {
       color: "#818CF8",
       onPress: () => {
         Theme.haptics.light();
-        showToast("Support page coming soon", "info");
+        router.push("/profile/support");
       },
     },
     {
@@ -426,17 +426,10 @@ export default function Profile() {
     },
     {
       icon: Wallet,
-      label: "This Month",
+      label: "Month Spent",
       value: formatRupees(stats?.monthSpending || 0),
       color: "#FBBF24",
       bgColor: "rgba(251, 191, 36, 0.1)",
-    },
-    {
-      icon: Flame,
-      label: "Current Streak",
-      value: `${stats?.streak || 0} day${(stats?.streak || 0) !== 1 ? "s" : ""}`,
-      color: "#F97316",
-      bgColor: "rgba(249, 115, 22, 0.1)",
     },
   ];
 
@@ -582,8 +575,8 @@ export default function Profile() {
                   borderWidth: 0.5,
                   borderColor: "rgba(255,255,255,0.05)",
                   borderRadius: 16,
-                  padding: 14,
-                  width: "48%",
+                  padding: 10,
+                  width: "30%",
                   flexGrow: 1,
                   shadowColor: "#000",
                   shadowOffset: { width: 0, height: 2 },

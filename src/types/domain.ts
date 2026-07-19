@@ -51,7 +51,7 @@ export interface ExpenseSplit {
   share_ratio: number | null;
 }
 
-export type TrackerType = "water_jar" | "tiffin" | "grocery_list" | "custom";
+export type TrackerType = "tiffin" | "grocery_list" | "custom";
 
 export interface Tracker {
   id: string;

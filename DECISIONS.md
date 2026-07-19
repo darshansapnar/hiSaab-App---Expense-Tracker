@@ -1,6 +1,6 @@
 # Architecture Decision Records (ADR)
 
-This document records the design and architectural choices made during the development of Hisab, explaining the context, alternatives considered, and rationale behind each decision.
+This document records the design and architectural choices made during the development of hiSaab, explaining the context, alternatives considered, and rationale behind each decision.
 
 ---
 
@@ -18,7 +18,7 @@ This document records the design and architectural choices made during the devel
 
 ## 📂 ADR 2: Zustand for Local State & Offline Queue
 *   **Status:** Approved
-*   **Context:** Hisab must support offline-first operations. Users should be able to log a transaction while in a basement shop with no internet connection, and expect the app to sync once connectivity is restored.
+*   **Context:** hiSaab must support offline-first operations. Users should be able to log a transaction while in a basement shop with no internet connection, and expect the app to sync once connectivity is restored.
 *   **Alternatives Considered:** Redux Toolkit, MobX, Context API.
 *   **Decision:** Zustand + Persist Middleware.
 *   **Rationale:**

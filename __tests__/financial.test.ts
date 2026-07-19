@@ -2,7 +2,6 @@ import {
   calculatePercentageSplit,
   calculateBudgetMetrics,
   calculateTiffinBill,
-  calculateWaterBill,
   calculateNetBalances
 } from '../src/utils/financial';
 import { safeAdd } from '../src/utils/math';
@@ -96,19 +95,6 @@ describe('financial.ts (Domain Calculations)', () => {
       const bill = calculateTiffinBill(logs, 50);
       // 2 present days * 50 = 100
       expect(bill).toBe(100);
-    });
-  });
-
-  describe('calculateWaterBill', () => {
-    it('calculates bill from water quantities', () => {
-      const logs = [
-        { id: '1', date: '2023-01-01', quantity: 1 },
-        { id: '2', date: '2023-01-05', quantity: 2 },
-      ];
-      
-      const bill = calculateWaterBill(logs, 30);
-      // 3 total jars * 30 = 90
-      expect(bill).toBe(90);
     });
   });
 

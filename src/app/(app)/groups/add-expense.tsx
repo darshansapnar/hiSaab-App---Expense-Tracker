@@ -21,6 +21,7 @@ import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { triggerWittyNotification } from "../../../services/wittyNotifications";
 
 const expenseFormSchema = z.object({
   amount: z.string().refine((val) => !isNaN(Number(val)) && Number(val) > 0, {
@@ -250,7 +251,7 @@ export default function AddExpense() {
           if (splitsError) throw splitsError;
         }
 
-        showToast("Expense shared among multiple payers logged!", "success");
+        triggerWittyNotification("expense_added", "Group Expense Logged");
       } else {
         // --- SINGLE PAYER CREATION/EDIT FLOW ---
         const paidById = data.paidBy || user?.id;
@@ -291,7 +292,7 @@ export default function AddExpense() {
 
           if (insertSplitsError) throw insertSplitsError;
 
-          showToast("Expense updated successfully", "success");
+          triggerWittyNotification("expense_updated", "Group Expense Updated");
         } else {
           const { data: newExpense, error: expenseError } = await supabase
             .from("expenses")
@@ -320,7 +321,7 @@ export default function AddExpense() {
           const { error: splitsError } = await supabase.from("expense_splits").insert(splitsPayload);
           if (splitsError) throw splitsError;
 
-          showToast("Expense added successfully", "success");
+          triggerWittyNotification("expense_added", "Group Expense Added");
         }
       }
 

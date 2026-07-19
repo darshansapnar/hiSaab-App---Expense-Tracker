@@ -1,10 +1,10 @@
-# Hisab — Shared Finance Platform
+# hiSaab — Shared Finance Platform
 
-> "No more 'Bhai, kitna dena hai?'"
+> "Keep the hisaab clear."
 
-Hisab is a modern, premium, and lightning-fast shared finance mobile application tailored for hostel students, flatmates, friends, families, couples, and travel groups. 
+hiSaab is a modern, premium, and lightning-fast shared finance mobile application tailored for hostel students, flatmates, friends, families, couples, and travel groups. 
 
-Unlike generic expense splitters, Hisab is built specifically for the everyday shared living experience. It seamlessly manages both one-off group expenses (like trips or dinners) and recurring daily utilities (like water jars, tiffin subscriptions, and shared grocery lists).
+Unlike generic expense splitters, hiSaab is built specifically for the everyday shared living experience. It seamlessly manages both one-off group expenses (like trips or dinners) and recurring daily utilities (like tiffin subscriptions and shared grocery lists).
 
 ---
 
@@ -12,7 +12,6 @@ Unlike generic expense splitters, Hisab is built specifically for the everyday s
 
 *   **Group Expense Splitting:** Flexible splitting methods (equal, percentage, exact shares, adjustment amounts) with instant balance recalculations.
 *   **Everyday Trackers:** 
-    *   **Water Jar Tracker:** Record deliveries with a single tap; automatically logs who consumed and calculates splits.
     *   **Tiffin Tracker:** Track meal subscriptions, skip days, and divide costs transparently.
     *   **Shared Groceries:** Real-time checklist that syncs purchases and automatically updates balances.
 *   **Monthly Budgets:** Visual budget bars with custom notification thresholds (e.g., alert at 80% spending limit).

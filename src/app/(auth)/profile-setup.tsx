@@ -19,6 +19,7 @@ import * as ImagePicker from "expo-image-picker";
 import { supabase } from "../../services/supabase";
 import { useAuthStore } from "../../store/authStore";
 import { useToastStore } from "../../store/toastStore";
+import { useNotificationsStore } from "../../store/notificationsStore";
 import { Theme } from "../../constants/Theme";
 import { Colors } from "../../constants/Colors";
 import {
@@ -217,6 +218,11 @@ export default function ProfileSetup() {
         Theme.haptics.success();
         setProfile(updatedProfile);
         showToast(`Welcome, @${finalUsername}! 🎉`, "success");
+        useNotificationsStore.getState().addNotification({
+          type: "welcome",
+          title: "Welcome Message 🎉",
+          description: "Welcome to hiSaab! Let's keep the hisaab clear and your finances clean. 🤝",
+        });
         // Auth gate in index.tsx will detect onboarding_completed and redirect to app
       }
     } catch (e) {
@@ -284,7 +290,11 @@ export default function ProfileSetup() {
             }),
           }}
         >
-          <Text style={{ fontSize: 56, marginBottom: 16 }}>👋</Text>
+          <Image
+            source={require("../../../assets/images/logo.png")}
+            style={{ width: 80, height: 80, borderRadius: 20, marginBottom: 16 }}
+            resizeMode="contain"
+          />
           <Text
             style={{
               color: "#FFFFFF",
@@ -294,7 +304,7 @@ export default function ProfileSetup() {
               textAlign: "center",
             }}
           >
-            Welcome to Hisab!
+            Welcome to hiSaab!
           </Text>
           <Text
             style={{

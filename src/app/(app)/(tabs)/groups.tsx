@@ -10,6 +10,7 @@ import {
   RefreshControl,
   KeyboardAvoidingView,
   Platform,
+  Image,
   Share,
 } from "react-native";
 import { useRouter } from "expo-router";
@@ -21,6 +22,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Theme } from "../../../constants/Theme";
 import { Colors } from "../../../constants/Colors";
 import * as Clipboard from "expo-clipboard";
+import { triggerWittyNotification } from "../../../services/wittyNotifications";
 import {
   Users,
   Plus,
@@ -36,6 +38,9 @@ import {
   ArrowDownLeft,
   Trash2,
   Share2,
+  Copy,
+  PartyPopper,
+  Check,
 } from "lucide-react-native";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -73,6 +78,7 @@ export default function Groups() {
   const [joinCode, setJoinCode] = useState("");
   const [isJoining, setIsJoining] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [createdGroup, setCreatedGroup] = useState<{ name: string; invite_code: string } | null>(null);
 
   // Ellipsis menu states
   const [selectedGroupForMenu, setSelectedGroupForMenu] = useState<any | null>(null);
@@ -161,14 +167,32 @@ export default function Groups() {
         throw new Error("Couldn't create the group. Please try again.");
       }
 
-      return newGroup;
+      // Parse the RPC response to get the group ID
+      const parsed = typeof newGroup === 'string' ? JSON.parse(newGroup) : newGroup;
+      const groupId = parsed?.id;
+
+      if (groupId) {
+        // Fetch the group with invite_code from the database directly
+        const { data: freshGroup } = await supabase
+          .from("groups")
+          .select("id, name, invite_code")
+          .eq("id", groupId)
+          .single();
+        return freshGroup;
+      }
+
+      return parsed;
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       Theme.haptics.success();
       queryClient.invalidateQueries({ queryKey: ["groups", user?.id] });
-      showToast("Group created successfully", "success");
+      triggerWittyNotification("group_created", "Group Created");
       setIsCreateOpen(false);
       reset();
+      // Show success bottom sheet with invite code
+      if (data?.invite_code) {
+        setCreatedGroup({ name: data.name, invite_code: data.invite_code });
+      }
     },
     onError: (error: any) => {
       Theme.haptics.error();
@@ -201,41 +225,29 @@ export default function Groups() {
     setIsJoining(true);
 
     try {
-      const cleanCode = joinCode.trim();
+      const { data, error } = await supabase.rpc("join_group_by_invite_code", {
+        p_invite_code: joinCode.trim().toUpperCase(),
+        p_user_id: user?.id,
+      });
 
-      // 1. Verify if group exists
-      const { data: group, error: groupError } = await supabase
-        .from("groups")
-        .select("*")
-        .eq("id", cleanCode)
-        .single();
-
-      if (groupError || !group) {
+      if (error) {
         Theme.haptics.error();
-        showToast("Invalid invite code. Group not found.", "error");
-        setIsJoining(false);
+        const msg = error.message || "";
+        if (msg.includes("not found")) {
+          showToast("Invite code not found.", "error");
+        } else if (msg.includes("already")) {
+          showToast("You're already in this group.", "info");
+        } else {
+          showToast(msg || "Failed to join group", "error");
+        }
         return;
       }
 
-      // 2. Add user to group_members
-      const { error: joinError } = await supabase.from("group_members").insert({
-        group_id: cleanCode,
-        profile_id: user?.id,
-        role: "member",
-      });
-
-      if (joinError) {
-        if (joinError.code === "23505") {
-          showToast("You are already a member of this group", "info");
-        } else {
-          throw joinError;
-        }
-      } else {
-        Theme.haptics.success();
-        showToast(`Successfully joined ${group.name}`, "success");
-        queryClient.invalidateQueries({ queryKey: ["groups", user?.id] });
-      }
-
+      Theme.haptics.success();
+      const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+      showToast(`Welcome to ${parsed?.group_name || "the group"}!`, "success");
+      triggerWittyNotification("member_joined", "New Group Member");
+      queryClient.invalidateQueries({ queryKey: ["groups", user?.id] });
       setIsJoinOpen(false);
       setJoinCode("");
     } catch (e: any) {
@@ -390,18 +402,18 @@ export default function Groups() {
               <View className="flex-row items-center">
                 <ArrowDownLeft size={14} color="#22C55E" />
                 <Text className="text-[#22C55E] text-xs font-black ml-1">
-                  You receive ₹{groupBalance.toFixed(0)}
+                  Receive ₹{groupBalance.toFixed(0)}
                 </Text>
               </View>
             ) : groupBalance < -0.01 ? (
               <View className="flex-row items-center">
                 <ArrowUpRight size={14} color="#EF4444" />
                 <Text className="text-[#EF4444] text-xs font-black ml-1">
-                  You owe ₹{Math.abs(groupBalance).toFixed(0)}
+                  Pay ₹{Math.abs(groupBalance).toFixed(0)}
                 </Text>
               </View>
             ) : (
-              <Text className="text-[#94A3B8] text-xs font-bold">Settled up</Text>
+              <Text className="text-[#94A3B8] text-xs font-bold">✓ Settled</Text>
             )}
           </View>
           <ChevronRight size={16} color={Colors.accentCyan} />
@@ -543,6 +555,11 @@ export default function Groups() {
             />
           ) : (
             <View className="flex-1 justify-center items-center px-4">
+              <Image
+                source={require("../../../../assets/images/logo.png")}
+                style={{ width: 80, height: 80, borderRadius: 20, opacity: 0.4, marginBottom: 16 }}
+                resizeMode="contain"
+              />
               <Text className="text-white text-lg font-bold text-center mb-2">No groups yet</Text>
               <Text className="text-accentGray text-sm text-center leading-relaxed mb-6">
                 Create a group for roommates or trips, or enter an invite code to join an existing
@@ -594,11 +611,11 @@ export default function Groups() {
                 onPress={async () => {
                   Theme.haptics.light();
                   try {
-                    const code = selectedGroupForMenu.id;
+                    const code = selectedGroupForMenu.invite_code || selectedGroupForMenu.id;
                     const name = selectedGroupForMenu.name;
                     await Share.share({
                       title: `Join ${name} on hiSaab`,
-                      message: `Join my shared ledger "${name}" on hiSaab!\nInvite Code: ${code}\nLink: https://hisaab.app/join?code=${code}`,
+                      message: `Join my hiSaab group!\n\nGroup:\n${name}\n\nInvite Code:\n${code}\n\nSee you inside 👋`,
                     });
                   } catch (e: any) {
                     showToast("Failed to share", "error");
@@ -718,7 +735,7 @@ export default function Groups() {
                   render={({ field: { onChange, onBlur, value } }) => (
                     <TextInput
                       className="bg-white/5 border-[0.5px] border-white/10 text-white px-4 py-3 rounded-xl"
-                      placeholder="Room rent, water jar, cleaning etc."
+                      placeholder="Room rent, grocery list, cleaning etc."
                       placeholderTextColor="#666666"
                       onBlur={onBlur}
                       onChangeText={onChange}
@@ -795,14 +812,16 @@ export default function Groups() {
               </TouchableOpacity>
             </View>
             <Text className="text-accentGray text-xs leading-relaxed mb-4">
-              Paste the invite code (group ID) shared by your friend to join their shared ledger.
+              Enter the invite code shared by your friend to join their group.
             </Text>
             <TextInput
-              className="bg-white/5 border-[0.5px] border-white/10 text-white px-4 py-3 rounded-xl mb-4 text-sm font-semibold"
-              placeholder="Paste invite code..."
-              placeholderTextColor="#666666"
-              onChangeText={setJoinCode}
+              className="bg-white/5 border-[0.5px] border-white/10 text-white px-4 py-3 rounded-xl mb-4 text-base font-black tracking-widest text-center uppercase"
+              placeholder="ROOM8X"
+              placeholderTextColor="#444444"
+              onChangeText={(t) => setJoinCode(t.toUpperCase())}
               value={joinCode}
+              maxLength={8}
+              autoCapitalize="characters"
             />
             <TouchableOpacity
               onPress={handleJoinGroup}
@@ -814,6 +833,77 @@ export default function Groups() {
               ) : (
                 <Text className="text-background font-bold">Join Group</Text>
               )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* GROUP CREATED SUCCESS BOTTOM SHEET */}
+      <Modal visible={!!createdGroup} animationType="slide" transparent>
+        <View className="flex-1 justify-end bg-black/70">
+          <View className="bg-[#0F1A2E] border-t border-white/10 rounded-t-3xl px-6 pt-8 pb-10">
+            {/* Header */}
+            <View className="items-center mb-6">
+              <View className="w-16 h-16 rounded-full bg-accentCyan/10 border border-accentCyan/30 justify-center items-center mb-4">
+                <PartyPopper size={28} color="#14E5D4" />
+              </View>
+              <Text className="text-white text-2xl font-black tracking-tight">Group Created!</Text>
+              <Text className="text-[#94A3B8] text-sm mt-1 text-center">
+                Invite your friends using this code.
+              </Text>
+            </View>
+
+            {/* Invite Code Display */}
+            <View className="bg-[#151E2E] border border-white/10 rounded-2xl p-5 mb-6 items-center">
+              <Text className="text-[#94A3B8] text-[10px] font-bold uppercase tracking-widest mb-2">
+                Invite Code
+              </Text>
+              <Text className="text-white text-3xl font-black tracking-[6px]">
+                {createdGroup?.invite_code}
+              </Text>
+            </View>
+
+            {/* Action Buttons */}
+            <View className="flex-row gap-3 mb-4">
+              <TouchableOpacity
+                onPress={async () => {
+                  Theme.haptics.light();
+                  if (createdGroup?.invite_code) {
+                    await Clipboard.setStringAsync(createdGroup.invite_code);
+                    showToast("Invite code copied.", "success");
+                  }
+                }}
+                className="flex-1 flex-row items-center justify-center bg-white/5 border border-white/10 py-3.5 rounded-xl active:scale-95"
+              >
+                <Copy size={16} color="#14E5D4" />
+                <Text className="text-white text-sm font-bold ml-2">Copy Code</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={async () => {
+                  Theme.haptics.light();
+                  try {
+                    await Share.share({
+                      title: `Join ${createdGroup?.name} on hiSaab`,
+                      message: `Join my hiSaab group!\n\nGroup:\n${createdGroup?.name}\n\nInvite Code:\n${createdGroup?.invite_code}\n\nSee you inside 👋`,
+                    });
+                  } catch {}
+                }}
+                className="flex-1 flex-row items-center justify-center bg-white/5 border border-white/10 py-3.5 rounded-xl active:scale-95"
+              >
+                <Share2 size={16} color="#14E5D4" />
+                <Text className="text-white text-sm font-bold ml-2">Share Invite</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity
+              onPress={() => {
+                Theme.haptics.light();
+                setCreatedGroup(null);
+              }}
+              className="bg-accentCyan py-4 rounded-xl items-center active:opacity-90"
+            >
+              <Text className="text-background font-black text-base">Done</Text>
             </TouchableOpacity>
           </View>
         </View>

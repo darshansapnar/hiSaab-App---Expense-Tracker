@@ -1,5 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { triggerWittyNotification } from "../../../services/wittyNotifications";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   View,
   Text,
@@ -206,6 +208,44 @@ export default function Analytics() {
   const targetDailyLimit = budgetLimit > 0 ? budgetLimit / daysInMonth : 0;
   const recommendedDailySpent = remainingBudget / remainingDays;
 
+  // Trigger monthly summary wrap once per month
+  useEffect(() => {
+    const checkMonthlySummary = async () => {
+      try {
+        const curMonthStr = new Date().toISOString().substring(0, 7); // "YYYY-MM"
+        const lastSummaryMonth = await AsyncStorage.getItem("last_monthly_summary_month");
+        
+        if (lastSummaryMonth !== curMonthStr) {
+          await triggerWittyNotification("monthly_summary", "Monthly Wrap");
+          await AsyncStorage.setItem("last_monthly_summary_month", curMonthStr);
+        }
+      } catch (e) {
+        // Ignore
+      }
+    };
+    checkMonthlySummary();
+  }, []);
+
+  // Trigger budget warning if limit is exceeded
+  useEffect(() => {
+    const checkBudgetWarning = async () => {
+      try {
+        if (budgetLimit > 0 && totalSpentCurMonth > budgetLimit) {
+          const todayStr = new Date().toISOString().split("T")[0];
+          const lastWarningDate = await AsyncStorage.getItem("last_budget_warning_date");
+          
+          if (lastWarningDate !== todayStr) {
+            await triggerWittyNotification("budget_warning", "Budget Exceeded Alert");
+            await AsyncStorage.setItem("last_budget_warning_date", todayStr);
+          }
+        }
+      } catch (e) {
+        // Ignore
+      }
+    };
+    checkBudgetWarning();
+  }, [totalSpentCurMonth, budgetLimit]);
+
   // --- GROUP SPENDING BREAKDOWN ---
   const groupSpendingBreakdown: Record<string, number> = {};
   curSplits.forEach((s) => {
@@ -356,54 +396,23 @@ export default function Analytics() {
         </Text>
       </View>
 
-      {/* DAILY ALLOWANCE BUDGET ANALYSIS */}
-      {budgetLimit > 0 && (
+      {/* BIGGEST CATEGORY HIGHLIGHT CARD */}
+      {sortedCategories.length > 0 && (
         <View className="bg-surface border-[0.5px] border-border rounded-2xl p-5 mb-6">
           <Text className="text-accentGray text-xs font-bold uppercase tracking-widest mb-3">
-            Budget Analysis
+            Biggest Category
           </Text>
-          <View className="space-y-3">
-            <View className="flex-row justify-between py-1 border-b-[0.5px] border-neutral-900">
-              <Text className="text-accentGray text-xs">Current Daily Average</Text>
-              <Text className="text-white text-xs font-bold">₹ {dailyAverageSpent.toFixed(0)}</Text>
+          <View className="flex-row justify-between items-center">
+            <View>
+              <Text className="text-white text-base font-black">{sortedCategories[0].name}</Text>
+              <Text className="text-accentGray text-[10px] mt-1">Where most of your rupees went</Text>
             </View>
-            <View className="flex-row justify-between py-1 border-b-[0.5px] border-neutral-900">
-              <Text className="text-accentGray text-xs">Target Daily Limit</Text>
-              <Text className="text-white text-xs font-bold">₹ {targetDailyLimit.toFixed(0)}</Text>
-            </View>
-            <View className="flex-row justify-between py-1">
-              <Text className="text-accentGray text-xs">Recommended Remaining Daily Spent</Text>
-              <Text className="text-accentCyan text-xs font-bold">₹ {recommendedDailySpent.toFixed(0)}</Text>
-            </View>
-          </View>
-          <View className="flex-row items-center border-[0.5px] border-neutral-900 bg-surfaceLight/50 p-3.5 rounded-xl mt-4">
-            <Activity size={16} color="#00F5D4" />
-            <Text className="text-accentGray text-[10px] ml-2 flex-1 leading-relaxed">
-              {dailyAverageSpent <= targetDailyLimit
-                ? "You are spending below your target daily limit! You are fully on track to stay within your budget."
-                : "You are currently exceeding your target daily limit. Try to keep daily expenses under the recommended target limit."}
+            <Text className="text-accentPink text-lg font-black">
+              ₹ {sortedCategories[0].amount.toFixed(0)}
             </Text>
           </View>
         </View>
       )}
-
-      {/* GROUP SPENDING SHARE BREAKDOWN */}
-      <View className="bg-surface border-[0.5px] border-border rounded-2xl p-5 mb-6">
-        <Text className="text-accentGray text-xs font-bold uppercase tracking-widest mb-3">
-          Group Spending Share
-        </Text>
-        <View className="space-y-3">
-          {Object.entries(groupSpendingBreakdown).map(([groupName, amount]) => (
-            <View key={groupName} className="flex-row justify-between items-center py-1 border-b-[0.5px] border-neutral-900">
-              <Text className="text-white text-xs font-semibold">{groupName}</Text>
-              <Text className="text-accentCyan text-xs font-bold">₹ {amount.toFixed(2)}</Text>
-            </View>
-          ))}
-          {Object.keys(groupSpendingBreakdown).length === 0 && (
-            <Text className="text-accentGray text-xs text-center py-2">No group spending recorded this month.</Text>
-          )}
-        </View>
-      </View>
 
       {/* CATEGORY CHARTS BREAKDOWN */}
       <Text className="text-accentGray text-xs font-bold uppercase tracking-widest mb-4">

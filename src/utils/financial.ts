@@ -123,21 +123,6 @@ export const calculateTiffinBill = (logs: TiffinLog[], ratePerTiffin: number): n
   const totalTiffins = logs.filter(log => log.is_present).length;
   return safeMultiply(totalTiffins, ratePerTiffin);
 };
-
-export interface WaterLog {
-  id: string;
-  date: string;
-  quantity: number;
-}
-
-/**
- * Calculates the total water jar bill for a month based on logs.
- */
-export const calculateWaterBill = (logs: WaterLog[], ratePerJar: number): number => {
-  const totalJars = logs.reduce((sum, log) => sum + log.quantity, 0);
-  return safeMultiply(totalJars, ratePerJar);
-};
-
 export interface Expense {
   id: string;
   amount: number;

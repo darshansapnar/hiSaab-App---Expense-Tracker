@@ -19,6 +19,8 @@ import { Theme } from "../../../constants/Theme";
 import { Colors } from "../../../constants/Colors";
 import { useToastStore } from "../../../store/toastStore";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { triggerWittyNotification } from "../../../services/wittyNotifications";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import Swipeable from "react-native-gesture-handler/Swipeable";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -243,7 +245,7 @@ export default function Dashboard() {
     onSuccess: () => {
       Theme.haptics.success();
       queryClient.invalidateQueries({ queryKey: ["dashboard-groups-latest", user?.id] });
-      showToast("Group created successfully", "success");
+      triggerWittyNotification("group_created", "Group Created");
       setIsCreateOpen(false);
       createForm.reset();
     },
@@ -271,7 +273,7 @@ export default function Dashboard() {
     onSuccess: () => {
       Theme.haptics.success();
       queryClient.invalidateQueries({ queryKey: ["dashboard-personal-expenses", user?.id] });
-      showToast("Expense updated successfully", "success");
+      triggerWittyNotification("expense_updated", "Expense Updated");
       setIsEditExpenseOpen(false);
       setEditingExpense(null);
     },
@@ -290,7 +292,7 @@ export default function Dashboard() {
     onSuccess: () => {
       Theme.haptics.success();
       queryClient.invalidateQueries({ queryKey: ["dashboard-personal-expenses", user?.id] });
-      showToast("Expense deleted successfully", "success");
+      triggerWittyNotification("expense_deleted", "Expense Deleted");
     },
     onError: (error: any) => {
       Theme.haptics.error();
@@ -333,7 +335,7 @@ export default function Dashboard() {
         }
       } else {
         Theme.haptics.success();
-        showToast(`Successfully joined ${group.name}`, "success");
+        triggerWittyNotification("member_joined", "New Group Member");
         queryClient.invalidateQueries({ queryKey: ["dashboard-groups-latest", user?.id] });
       }
 
@@ -402,6 +404,37 @@ export default function Dashboard() {
       topCategoryName,
       count: currentMonthExpenses.length,
     };
+  }, [personalExpenses]);
+
+  // Trigger witty daily reminder check
+  useEffect(() => {
+    const checkDailyReminder = async () => {
+      try {
+        const todayStr = new Date().toISOString().split("T")[0];
+        const lastReminderDate = await AsyncStorage.getItem("last_daily_reminder_date");
+        
+        if (lastReminderDate !== todayStr) {
+          const startOfToday = new Date();
+          startOfToday.setHours(0, 0, 0, 0);
+          
+          const todayExpenses = (personalExpenses || []).filter((e: any) => {
+            const expDate = new Date(e.expense_date);
+            return expDate >= startOfToday;
+          });
+          
+          if (todayExpenses.length === 0) {
+            await triggerWittyNotification("daily_reminder", "hiSaab Reminder");
+            await AsyncStorage.setItem("last_daily_reminder_date", todayStr);
+          }
+        }
+      } catch (e) {
+        // Ignore
+      }
+    };
+    
+    if (personalExpenses) {
+      checkDailyReminder();
+    }
   }, [personalExpenses]);
 
   // Aggregate To Pay and To Receive sums
@@ -571,7 +604,7 @@ export default function Dashboard() {
               }}
               numberOfLines={1}
             >
-              Hi, {profile?.username ? `@${profile.username}` : profile?.display_name || "Hisab User"} 👋
+              Hi, {profile?.username ? `@${profile.username}` : profile?.display_name || "hiSaab User"} 👋
             </Text>
             <Text
               style={{

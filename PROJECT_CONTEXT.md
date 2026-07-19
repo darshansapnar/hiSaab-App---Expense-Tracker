@@ -1,11 +1,11 @@
-# Project Context: Hisab
+# Project Context: hiSaab
 
 ## 📌 Background & Vision
-Hisab is a shared finance platform designed to remove the social and mechanical friction of managing money in group dynamics. 
+hiSaab is a shared finance platform designed to remove the social and mechanical friction of managing money in group dynamics. 
 
-The name "Hisab" translates to "calculation" or "ledger" in several South Asian languages, capturing the core essence of the application. Our target tagline — **"No more 'Bhai, kitna dena hai?'"** — represents the primary frustration we aim to solve: the awkwardness and complexity of figure-settling among friends, roommates, and travel companions.
+The name "hiSaab" translates to "calculation" or "ledger" in several South Asian languages, capturing the core essence of the application. Our target tagline — **"Keep the hisaab clear."** — represents the primary frustration we aim to solve: the awkwardness and complexity of figure-settling among friends, roommates, and travel companions.
 
-Hisab is positioned not as a clone of Splitwise, but as a next-generation everyday utility that embeds itself in the daily routines of flatmates, hostelers, and couples.
+hiSaab is positioned not as a clone of Splitwise, but as a next-generation everyday utility that embeds itself in the daily routines of flatmates, hostelers, and couples.
 
 ---
 
@@ -28,8 +28,8 @@ In everyday shared living (especially in student hostels or shared apartments), 
 
 ### 2. The Flatmates ("Sneha & Aisha")
 *   **Context:** Share a 2BHK apartment in an urban center.
-*   **Behavior:** Share rent, electricity, Wi-Fi, cleaning supplies, and order a joint 20-liter water jar every 3 days.
-*   **Pain Point:** Remembering who paid for the last water jar, who used how much of it, and avoiding the monthly hassle of manual spreadsheet calculations.
+*   **Behavior:** Share rent, electricity, Wi-Fi, cleaning supplies, and recurring groceries.
+*   **Pain Point:** Avoiding the monthly hassle of manual spreadsheet calculations.
 
 ### 3. The Travel Group ("The Wanderers")
 *   **Context:** 6 friends going on a weekend trip to Goa.
@@ -48,7 +48,7 @@ We believe financial interfaces should feel premium and tactile.
 
 ### 2. Micro-Animations & Haptic Feedback
 Every action should have weight. 
-*   A tactile double-tap logs a water jar delivery.
+*   A tactile tap registers a daily tiffin log.
 *   A subtle spring animation slides down the settlement panel when balances clear.
 *   A physical vibration patterns on completion of a log.
 

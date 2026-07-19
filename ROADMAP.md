@@ -1,12 +1,12 @@
-# Product Roadmap: Hisab
+# Product Roadmap: hiSaab
 
-This roadmap outlines the milestones required to build Hisab from its initial foundation to a production-ready, feature-rich shared finance ecosystem.
+This roadmap outlines the milestones required to build hiSaab from its initial foundation to a production-ready, feature-rich shared finance ecosystem.
 
 ---
 
 ```mermaid
 gantt
-    title Hisab Product Roadmap
+    title hiSaab Product Roadmap
     dateFormat  YYYY-MM-DD
     section Core Infrastructure
     Phase 1: Foundation Setup          :active, p1, 2026-07-18, 5d
@@ -67,7 +67,6 @@ gantt
 ### Phase 6: Daily Life Utility Trackers (The Key Differentiator)
 *   **Goal:** Build dedicated workflows for tracking daily micro-transactions.
 *   **Deliverables:**
-    *   **Water Jar Widget:** Single-tap tracker logging delivery count and active consumer distributions.
     *   **Tiffin Tracker:** Daily log dashboard supporting skip options, custom rates, and monthly tallies.
     *   **Grocery Shared Checklist:** Realtime checklist syncing additions, checkoffs, and split costs instantly.
 
