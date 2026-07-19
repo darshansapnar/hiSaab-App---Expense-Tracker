@@ -42,6 +42,7 @@ import {
   PartyPopper,
   Check,
 } from "lucide-react-native";
+import { SkeletonGroupCard } from "../../../components/ui/Skeleton";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -552,8 +553,11 @@ export default function Groups() {
 
           {/* GROUPS LIST */}
           {isLoading || isBalancesLoading ? (
-            <View className="flex-1 justify-center items-center">
-              <ActivityIndicator size="large" color={Colors.accentCyan} />
+            <View className="px-6 flex-1 space-y-4">
+              <SkeletonGroupCard />
+              <SkeletonGroupCard />
+              <SkeletonGroupCard />
+              <SkeletonGroupCard />
             </View>
           ) : filteredGroups.length > 0 ? (
             <FlatList

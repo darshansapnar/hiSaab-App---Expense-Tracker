@@ -22,6 +22,7 @@ import {
   X,
   Save,
 } from "lucide-react-native";
+import { Skeleton, SkeletonCard, SkeletonChart } from "../../../components/ui/Skeleton";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -491,9 +492,47 @@ export default function Analytics() {
 
   if (isBudgetLoading || isPersonalLoading || isMembershipsLoading || isGroupLoading) {
     return (
-      <View className="flex-1 justify-center items-center bg-[#0B1220]">
-        <ActivityIndicator size="large" color={Colors.accentCyan} />
-      </View>
+      <SafeAreaView style={{ flex: 1, backgroundColor: "#0B1220" }}>
+        <ScrollView className="flex-1 px-6" contentContainerStyle={{ paddingBottom: 50 }}>
+          {/* Top Header */}
+          <View className="flex-row justify-between items-center mb-6 mt-4">
+            <Text className="text-2xl font-black text-white tracking-tighter">Analytics</Text>
+            <TouchableOpacity disabled className="bg-[#151E2E] border-[0.5px] border-white/10 px-4 py-2.5 rounded-xl opacity-50">
+              <Text className="text-white text-xs font-bold">Set Budget</Text>
+            </TouchableOpacity>
+          </View>
+ 
+          {/* Filters Select row skeleton */}
+          <View className="flex-row bg-[#151E2E] border-[0.5px] border-white/5 rounded-xl p-1 mb-6 shadow-md h-10 w-full justify-between items-center px-4">
+            <Skeleton width="14%" height="80%" borderRadius={6} />
+            <Skeleton width="18%" height="80%" borderRadius={6} />
+            <Skeleton width="18%" height="80%" borderRadius={6} />
+            <Skeleton width="18%" height="80%" borderRadius={6} />
+            <Skeleton width="18%" height="80%" borderRadius={6} />
+          </View>
+ 
+          {/* Overview Cards (grid of 4 cards) */}
+          <View className="flex-row flex-wrap gap-3 mb-6">
+            <SkeletonCard height={94} style={{ width: "48%" }} />
+            <SkeletonCard height={94} style={{ width: "48%" }} />
+            <SkeletonCard height={94} style={{ width: "48%" }} />
+            <SkeletonCard height={94} style={{ width: "48%" }} />
+          </View>
+ 
+          {/* Budget Limit Card */}
+          <View className="bg-[#151E2E]/60 border-[0.5px] border-white/5 rounded-2xl p-5 mb-6">
+            <Skeleton width="40%" height={12} borderRadius={4} className="mb-3" />
+            <Skeleton width="90%" height={8} borderRadius={4} className="mb-2" />
+            <Skeleton width="60%" height={10} borderRadius={4} />
+          </View>
+ 
+          {/* Chart Skeletons */}
+          <View className="space-y-6">
+            <SkeletonChart />
+            <SkeletonChart />
+          </View>
+        </ScrollView>
+      </SafeAreaView>
     );
   }
 

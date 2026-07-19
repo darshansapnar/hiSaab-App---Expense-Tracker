@@ -46,6 +46,7 @@ import {
   Award,
   Bell,
 } from "lucide-react-native";
+import { Skeleton, SkeletonGroupCard, SkeletonExpenseItem } from "../../../components/ui/Skeleton";
 
 // Form schemas for Create Group, Join Group, and Edit Expense
 const createGroupSchema = z.object({
@@ -178,7 +179,7 @@ export default function Dashboard() {
   });
 
   // 4. Fetch peer balances to calculate To Pay & To Receive metrics
-  const { data: peerBalances } = useQuery({
+  const { data: peerBalances, isLoading: isPeerBalancesLoading } = useQuery({
     queryKey: ["dashboard-peer-balances", user?.id],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -729,102 +730,118 @@ export default function Dashboard() {
               >
                 This Month
               </Text>
-              <Text style={{ color: "#FFFFFF", fontSize: 18, fontWeight: "900", marginTop: 2 }}>
-                ₹{stats.totalSpent.toFixed(0)}
-              </Text>
+              {isExpensesLoading ? (
+                <Skeleton width="50%" height={16} borderRadius={4} style={{ marginTop: 6 }} />
+              ) : (
+                <Text style={{ color: "#FFFFFF", fontSize: 18, fontWeight: "900", marginTop: 2 }}>
+                  ₹{stats.totalSpent.toFixed(0)}
+                </Text>
+              )}
             </View>
-
-            {/* Card 2: To Pay */}
-            <View
-              style={{
-                backgroundColor: Colors.surface,
-                borderWidth: 0.5,
-                borderColor: "rgba(255,255,255,0.05)",
-                borderRadius: 16,
-                padding: 12,
-                width: "48%",
-                flexGrow: 1,
-              }}
-            >
-              <View className="w-8 h-8 rounded-lg bg-[#EF4444]/10 justify-center items-center mb-2.5">
-                <ArrowUpRight size={16} color="#EF4444" />
-              </View>
-              <Text
-                style={{
-                  color: "#94A3B8",
-                  fontSize: 10,
-                  fontWeight: "700",
-                  textTransform: "uppercase",
-                }}
-              >
-                To Pay
-              </Text>
-              <Text style={{ color: "#FFFFFF", fontSize: 18, fontWeight: "900", marginTop: 2 }}>
-                ₹{balanceSums.toPay.toFixed(0)}
-              </Text>
-            </View>
-
-            {/* Card 3: To Receive */}
-            <View
-              style={{
-                backgroundColor: Colors.surface,
-                borderWidth: 0.5,
-                borderColor: "rgba(255,255,255,0.05)",
-                borderRadius: 16,
-                padding: 12,
-                width: "48%",
-                flexGrow: 1,
-              }}
-            >
-              <View className="w-8 h-8 rounded-lg bg-[#22C55E]/10 justify-center items-center mb-2.5">
-                <ArrowDownLeft size={16} color="#22C55E" />
-              </View>
-              <Text
-                style={{
-                  color: "#94A3B8",
-                  fontSize: 10,
-                  fontWeight: "700",
-                  textTransform: "uppercase",
-                }}
-              >
-                To Receive
-              </Text>
-              <Text style={{ color: "#FFFFFF", fontSize: 18, fontWeight: "900", marginTop: 2 }}>
-                ₹{balanceSums.toReceive.toFixed(0)}
-              </Text>
-            </View>
-
-            {/* Card 4: Transactions count */}
-            <View
-              style={{
-                backgroundColor: Colors.surface,
-                borderWidth: 0.5,
-                borderColor: "rgba(255,255,255,0.05)",
-                borderRadius: 16,
-                padding: 12,
-                width: "48%",
-                flexGrow: 1,
-              }}
-            >
-              <View className="w-8 h-8 rounded-lg bg-[#818CF8]/10 justify-center items-center mb-2.5">
-                <Clock size={16} color="#818CF8" />
-              </View>
-              <Text
-                style={{
-                  color: "#94A3B8",
-                  fontSize: 10,
-                  fontWeight: "700",
-                  textTransform: "uppercase",
-                }}
-              >
-                Transactions
-              </Text>
-              <Text style={{ color: "#FFFFFF", fontSize: 18, fontWeight: "900", marginTop: 2 }}>
-                {stats.count}
-              </Text>
-            </View>
-          </View>
-        </View>
+ 
+             {/* Card 2: To Pay */}
+             <View
+               style={{
+                 backgroundColor: Colors.surface,
+                 borderWidth: 0.5,
+                 borderColor: "rgba(255,255,255,0.05)",
+                 borderRadius: 16,
+                 padding: 12,
+                 width: "48%",
+                 flexGrow: 1,
+               }}
+             >
+               <View className="w-8 h-8 rounded-lg bg-[#EF4444]/10 justify-center items-center mb-2.5">
+                 <ArrowUpRight size={16} color="#EF4444" />
+               </View>
+               <Text
+                 style={{
+                   color: "#94A3B8",
+                   fontSize: 10,
+                   fontWeight: "700",
+                   textTransform: "uppercase",
+                 }}
+               >
+                 To Pay
+               </Text>
+               {isPeerBalancesLoading ? (
+                 <Skeleton width="50%" height={16} borderRadius={4} style={{ marginTop: 6 }} />
+               ) : (
+                 <Text style={{ color: "#FFFFFF", fontSize: 18, fontWeight: "900", marginTop: 2 }}>
+                   ₹{balanceSums.toPay.toFixed(0)}
+                 </Text>
+               )}
+             </View>
+ 
+             {/* Card 3: To Receive */}
+             <View
+               style={{
+                 backgroundColor: Colors.surface,
+                 borderWidth: 0.5,
+                 borderColor: "rgba(255,255,255,0.05)",
+                 borderRadius: 16,
+                 padding: 12,
+                 width: "48%",
+                 flexGrow: 1,
+               }}
+             >
+               <View className="w-8 h-8 rounded-lg bg-[#22C55E]/10 justify-center items-center mb-2.5">
+                 <ArrowDownLeft size={16} color="#22C55E" />
+               </View>
+               <Text
+                 style={{
+                   color: "#94A3B8",
+                   fontSize: 10,
+                   fontWeight: "700",
+                   textTransform: "uppercase",
+                 }}
+               >
+                 To Receive
+               </Text>
+               {isPeerBalancesLoading ? (
+                 <Skeleton width="50%" height={16} borderRadius={4} style={{ marginTop: 6 }} />
+               ) : (
+                 <Text style={{ color: "#FFFFFF", fontSize: 18, fontWeight: "900", marginTop: 2 }}>
+                   ₹{balanceSums.toReceive.toFixed(0)}
+                 </Text>
+               )}
+             </View>
+ 
+             {/* Card 4: Transactions count */}
+             <View
+               style={{
+                 backgroundColor: Colors.surface,
+                 borderWidth: 0.5,
+                 borderColor: "rgba(255,255,255,0.05)",
+                 borderRadius: 16,
+                 padding: 12,
+                 width: "48%",
+                 flexGrow: 1,
+               }}
+             >
+               <View className="w-8 h-8 rounded-lg bg-[#818CF8]/10 justify-center items-center mb-2.5">
+                 <Clock size={16} color="#818CF8" />
+               </View>
+               <Text
+                 style={{
+                   color: "#94A3B8",
+                   fontSize: 10,
+                   fontWeight: "700",
+                   textTransform: "uppercase",
+                 }}
+               >
+                 Transactions
+               </Text>
+               {isExpensesLoading ? (
+                 <Skeleton width="40%" height={16} borderRadius={4} style={{ marginTop: 6 }} />
+               ) : (
+                 <Text style={{ color: "#FFFFFF", fontSize: 18, fontWeight: "900", marginTop: 2 }}>
+                   {stats.count}
+                 </Text>
+               )}
+             </View>
+           </View>
+         </View>
 
         {/* ── QUICK ACTIONS ── */}
         <View className="px-6 mb-6">
@@ -1082,7 +1099,10 @@ export default function Dashboard() {
             }}
           >
             {isGroupsLoading ? (
-              <ActivityIndicator size="small" color={Colors.accentCyan} className="py-4" />
+              <View className="space-y-3">
+                <SkeletonGroupCard />
+                <SkeletonGroupCard />
+              </View>
             ) : groups && groups.length > 0 ? (
               <View className="space-y-3">
                 {groups.map((g, index) => {
@@ -1212,7 +1232,11 @@ export default function Dashboard() {
           </View>
 
           {isExpensesLoading ? (
-            <ActivityIndicator size="small" color={Colors.accentCyan} className="py-4" />
+            <View className="space-y-2">
+              <SkeletonExpenseItem />
+              <SkeletonExpenseItem />
+              <SkeletonExpenseItem />
+            </View>
           ) : latestExpenses.length > 0 ? (
             <View className="space-y-2">
               {latestExpenses.map((item) => (

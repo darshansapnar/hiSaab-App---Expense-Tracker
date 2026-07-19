@@ -39,6 +39,7 @@ import {
   X,
 } from "lucide-react-native";
 import { useRouter } from "expo-router";
+import { Skeleton } from "../../../components/ui/Skeleton";
 
 const profileSchema = z.object({
   displayName: z
@@ -596,22 +597,11 @@ export default function Profile() {
                       alignItems: "center",
                     }}
                   >
-                    {isStatsLoading ? (
-                      <ActivityIndicator size="small" color={stat.color} />
-                    ) : (
-                      <stat.icon size={16} color={stat.color} />
-                    )}
+                    <stat.icon size={16} color={stat.color} />
                   </View>
                 </View>
                 {isStatsLoading ? (
-                  <View
-                    style={{
-                      width: 48,
-                      height: 20,
-                      borderRadius: 6,
-                      backgroundColor: Colors.surfaceLight,
-                    }}
-                  />
+                  <Skeleton width={52} height={20} borderRadius={6} />
                 ) : (
                   <Text
                     style={{

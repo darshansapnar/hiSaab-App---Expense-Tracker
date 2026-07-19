@@ -43,6 +43,7 @@ import {
   Share2,
   RefreshCw,
 } from "lucide-react-native";
+import { Skeleton, SkeletonExpenseItem } from "../../../components/ui/Skeleton";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -580,9 +581,49 @@ export default function GroupDetail() {
 
   if (isGroupLoading || isMembersLoading || isExpensesLoading || isBalancesLoading) {
     return (
-      <View className="flex-1 justify-center items-center bg-[#0B1220]">
-        <ActivityIndicator size="large" color={Colors.accentCyan} />
-      </View>
+      <SafeAreaView style={{ flex: 1, backgroundColor: "#0B1220" }}>
+        {/* Top Navigation */}
+        <View className="flex-row justify-between items-center px-6 pb-4 border-b-[0.5px] border-white/5">
+          <TouchableOpacity disabled className="p-1 rounded-full bg-[#151E2E] border-[0.5px] border-white/10 opacity-55">
+            <ChevronLeft size={20} color={Colors.accentCyan} />
+          </TouchableOpacity>
+          <Skeleton width="40%" height={16} borderRadius={4} />
+          <TouchableOpacity disabled className="p-1 rounded-full bg-[#151E2E] border-[0.5px] border-white/10 opacity-55">
+            <Settings size={20} color="#94A3B8" />
+          </TouchableOpacity>
+        </View>
+ 
+        <ScrollView contentContainerStyle={{ padding: 24 }} showsVerticalScrollIndicator={false}>
+          {/* Banner Card Skeleton */}
+          <View className="bg-[#151E2E]/60 border-[0.5px] border-white/5 rounded-2xl p-5 mb-6 flex-row justify-between items-center">
+            <View className="flex-row items-center flex-1 mr-4">
+              <Skeleton width={48} height={48} borderRadius={24} className="mr-3" />
+              <View className="flex-1 space-y-2">
+                <Skeleton width="70%" height={14} borderRadius={4} />
+                <Skeleton width="40%" height={8} borderRadius={4} />
+              </View>
+            </View>
+            <Skeleton width={80} height={44} borderRadius={12} />
+          </View>
+ 
+          {/* Tabs skeleton */}
+          <View className="flex-row justify-between mb-6 h-8 w-full">
+            <Skeleton width="18%" height="100%" borderRadius={8} />
+            <Skeleton width="18%" height="100%" borderRadius={8} />
+            <Skeleton width="18%" height="100%" borderRadius={8} />
+            <Skeleton width="18%" height="100%" borderRadius={8} />
+            <Skeleton width="18%" height="100%" borderRadius={8} />
+          </View>
+ 
+          {/* List Items Skeletons */}
+          <View className="space-y-4">
+            <SkeletonExpenseItem />
+            <SkeletonExpenseItem />
+            <SkeletonExpenseItem />
+            <SkeletonExpenseItem />
+          </View>
+        </ScrollView>
+      </SafeAreaView>
     );
   }
 
