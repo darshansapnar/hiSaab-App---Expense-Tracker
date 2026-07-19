@@ -13,6 +13,7 @@
       "android": {
         "buildType": "apk"
       },
+      "node": "22.13.0",
       "env": {
         "EXPO_PUBLIC_SUPABASE_URL": "https://ucpzphhrszfjcstcbkmg.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVjcHpwaGhyc3pmamNzdGNia21nIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQzNjA4MzcsImV4cCI6MjA5OTkzNjgzN30._PDcWzHwTwURfuj1ue0x3-bCzRiB0Sse3FDztaBXn-Y"
@@ -20,6 +21,7 @@
     },
     "production": {
       "autoIncrement": true,
+      "node": "22.13.0",
       "env": {
         "EXPO_PUBLIC_SUPABASE_URL": "https://ucpzphhrszfjcstcbkmg.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVjcHpwaGhyc3pmamNzdGNia21nIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQzNjA4MzcsImV4cCI6MjA5OTkzNjgzN30._PDcWzHwTwURfuj1ue0x3-bCzRiB0Sse3FDztaBXn-Y"

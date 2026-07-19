@@ -1,0 +1,10 @@
+# EAS Build - Ignore unnecessary files
+.git
+.github
+.husky
+__tests__
+supabase/migrations
+*.md
+.env.local
+.env.*.local
+.gemini
