@@ -24,7 +24,7 @@ export function useRealtimeSync(groupId?: string) {
   useEffect(() => {
     if (!user?.id) return;
 
-    // Listen to changes on 'expenses', 'group_members', 'groups', 'peer_balances', and 'expense_splits' tables
+    // Listen to changes on 'expenses', 'group_members', 'groups', 'peer_balances', 'expense_splits', 'personal_expenses', 'budgets', and 'profiles' tables
     const groupSyncChannel = supabase
       .channel("realtime-group-sync")
       .on(
@@ -34,8 +34,11 @@ export function useRealtimeSync(groupId?: string) {
           // 1. Instantly refresh active list queries across all caches
           queryClient.invalidateQueries({ queryKey: ["group-expenses"] });
           queryClient.invalidateQueries({ queryKey: ["peer-balances"] });
+          queryClient.invalidateQueries({ queryKey: ["dashboard-peer-balances"] });
           queryClient.invalidateQueries({ queryKey: ["global-peer-balances"] });
           queryClient.invalidateQueries({ queryKey: ["groups"] });
+          queryClient.invalidateQueries({ queryKey: ["dashboard-groups-latest"] });
+          queryClient.invalidateQueries({ queryKey: ["profile-stats"] });
 
           // 2. Filter alerts: Only show notification reminders if someone else triggered the mutation
           if (payload.eventType === "INSERT") {
@@ -87,8 +90,11 @@ export function useRealtimeSync(groupId?: string) {
         async (payload) => {
           queryClient.invalidateQueries({ queryKey: ["group-members"] });
           queryClient.invalidateQueries({ queryKey: ["groups"] });
+          queryClient.invalidateQueries({ queryKey: ["dashboard-groups-latest"] });
           queryClient.invalidateQueries({ queryKey: ["peer-balances"] });
+          queryClient.invalidateQueries({ queryKey: ["dashboard-peer-balances"] });
           queryClient.invalidateQueries({ queryKey: ["global-peer-balances"] });
+          queryClient.invalidateQueries({ queryKey: ["profile-stats"] });
         }
       )
       .on(
@@ -97,6 +103,7 @@ export function useRealtimeSync(groupId?: string) {
         async (payload) => {
           queryClient.invalidateQueries({ queryKey: ["group"] });
           queryClient.invalidateQueries({ queryKey: ["groups"] });
+          queryClient.invalidateQueries({ queryKey: ["dashboard-groups-latest"] });
         }
       )
       .on(
@@ -104,6 +111,7 @@ export function useRealtimeSync(groupId?: string) {
         { event: "*", schema: "public", table: "peer_balances" },
         async (payload) => {
           queryClient.invalidateQueries({ queryKey: ["peer-balances"] });
+          queryClient.invalidateQueries({ queryKey: ["dashboard-peer-balances"] });
           queryClient.invalidateQueries({ queryKey: ["global-peer-balances"] });
         }
       )
@@ -113,7 +121,32 @@ export function useRealtimeSync(groupId?: string) {
         async (payload) => {
           queryClient.invalidateQueries({ queryKey: ["group-expenses"] });
           queryClient.invalidateQueries({ queryKey: ["peer-balances"] });
+          queryClient.invalidateQueries({ queryKey: ["dashboard-peer-balances"] });
           queryClient.invalidateQueries({ queryKey: ["global-peer-balances"] });
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "personal_expenses" },
+        async (payload) => {
+          queryClient.invalidateQueries({ queryKey: ["personal-expenses"] });
+          queryClient.invalidateQueries({ queryKey: ["dashboard-personal-expenses"] });
+          queryClient.invalidateQueries({ queryKey: ["profile-stats"] });
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "budgets" },
+        async (payload) => {
+          queryClient.invalidateQueries({ queryKey: ["budget"] });
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "profiles" },
+        async (payload) => {
+          queryClient.invalidateQueries({ queryKey: ["profile"] });
+          queryClient.invalidateQueries({ queryKey: ["group-members"] });
         }
       )
       .subscribe();
