@@ -328,6 +328,8 @@ export default function AddExpense() {
       Theme.haptics.success();
       queryClient.invalidateQueries({ queryKey: ["group-expenses", groupId] });
       queryClient.invalidateQueries({ queryKey: ["peer-balances", groupId] });
+      queryClient.invalidateQueries({ queryKey: ["global-peer-balances", user?.id] });
+      queryClient.invalidateQueries({ queryKey: ["groups", user?.id] });
       router.back();
     } catch (e: any) {
       Theme.haptics.error();

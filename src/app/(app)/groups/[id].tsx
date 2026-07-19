@@ -195,7 +195,8 @@ export default function GroupDetail() {
       queryClient.invalidateQueries({ queryKey: ["peer-balances", id] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-peer-balances"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-personal-expenses"] });
-      queryClient.invalidateQueries({ queryKey: ["groups"] });
+      queryClient.invalidateQueries({ queryKey: ["groups", user?.id] });
+      queryClient.invalidateQueries({ queryKey: ["global-peer-balances", user?.id] });
       triggerWittyNotification("settlement_completed", "Settlement Done");
       setIsSettleModalOpen(false);
     },
@@ -237,6 +238,8 @@ export default function GroupDetail() {
       Theme.haptics.success();
       queryClient.invalidateQueries({ queryKey: ["group-expenses", id] });
       queryClient.invalidateQueries({ queryKey: ["peer-balances", id] });
+      queryClient.invalidateQueries({ queryKey: ["global-peer-balances", user?.id] });
+      queryClient.invalidateQueries({ queryKey: ["groups", user?.id] });
       triggerWittyNotification("settlement_completed", "Settlement Confirmed");
     },
     onError: (error: any) => {
@@ -255,6 +258,8 @@ export default function GroupDetail() {
       Theme.haptics.success();
       queryClient.invalidateQueries({ queryKey: ["group-expenses", id] });
       queryClient.invalidateQueries({ queryKey: ["peer-balances", id] });
+      queryClient.invalidateQueries({ queryKey: ["global-peer-balances", user?.id] });
+      queryClient.invalidateQueries({ queryKey: ["groups", user?.id] });
       triggerWittyNotification("expense_deleted", "Expense Deleted");
     },
     onError: (error: any) => {
@@ -660,7 +665,7 @@ export default function GroupDetail() {
           ListHeaderComponent={
             <>
               {/* Banner Category Card */}
-              <View className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-5 mb-6 items-center flex-row justify-between shadow-lg">
+              <View className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-5 mb-6 flex-row justify-between items-center shadow-lg">
                 <View className="flex-row items-center flex-1 mr-4">
                   <View
                     className={`w-12 h-12 justify-center items-center rounded-full border-[0.5px] mr-3 ${avatar.bgClass}`}
@@ -676,21 +681,16 @@ export default function GroupDetail() {
                     </Text>
                   </View>
                 </View>
-              </View>
 
-              {/* Invite Friends Section at the top of Group Details (Overview tab) */}
-              {activeTab === "overview" && (
-                <View className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-5 mb-6 shadow-lg">
-                  <View className="flex-row justify-between items-center mb-3">
-                    <Text className="text-white text-sm font-black">Invite Friends</Text>
-                    <View className="bg-accentCyan/10 px-2 py-0.5 rounded border border-accentCyan/20">
-                      <Text className="text-accentCyan text-[9px] font-black uppercase">
-                        Code: {group.invite_code || "—"}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <View className="flex-row gap-2">
+                {/* Always Visible Invite Code Widget */}
+                <View className="items-end bg-white/5 border border-white/10 rounded-xl p-2.5">
+                  <Text className="text-[#94A3B8] text-[8px] font-bold uppercase tracking-wider mb-0.5">
+                    Invite Code
+                  </Text>
+                  <Text className="text-white text-sm font-black tracking-widest mb-1.5">
+                    {group.invite_code || "—"}
+                  </Text>
+                  <View className="flex-row space-x-1">
                     <TouchableOpacity
                       onPress={async () => {
                         Theme.haptics.light();
@@ -698,30 +698,58 @@ export default function GroupDetail() {
                         await Clipboard.setStringAsync(code);
                         showToast("Invite code copied.", "success");
                       }}
-                      className="flex-1 flex-row items-center justify-center bg-white/5 border-[0.5px] border-white/10 py-2.5 rounded-xl active:scale-95"
+                      className="p-1.5 bg-white/5 border border-white/10 rounded-lg active:scale-95 mr-1"
                     >
-                      <Copy size={13} color="#14E5D4" />
-                      <Text className="text-white text-xs font-bold ml-1.5">Copy Code</Text>
+                      <Copy size={12} color="#14E5D4" />
                     </TouchableOpacity>
-
                     <TouchableOpacity
                       onPress={async () => {
                         Theme.haptics.light();
                         const code = group.invite_code || group.id;
                         try {
                           await Share.share({
-                            message: `Join my hiSaab group!\n\nGroup: ${group.name}\nInvite Code: ${code}\n\nOpen hiSaab → Groups → Join Group and enter this code.`,
+                            message: `Join my hiSaab group!\n\nGroup: ${group.name}\nInvite Code: ${code}\n\nOpen hiSaab → Groups → Join Group and enter this code.\n\nKeep the hisaab clear. 🤝`,
                           });
                         } catch {}
                       }}
-                      className="flex-grow flex-shrink flex-row items-center justify-center bg-white/5 border-[0.5px] border-white/10 py-2.5 rounded-xl active:scale-95"
+                      className="p-1.5 bg-white/5 border border-white/10 rounded-lg active:scale-95 mr-1"
                     >
-                      <Share2 size={13} color="#14E5D4" />
-                      <Text className="text-white text-xs font-bold ml-1.5">Share Invite</Text>
+                      <Share2 size={12} color="#14E5D4" />
                     </TouchableOpacity>
+
+                    {/* Regenerate (admin only) */}
+                    {group.created_by === user?.id && (
+                      <TouchableOpacity
+                        onPress={async () => {
+                          Theme.haptics.light();
+                          setIsRegenerating(true);
+                          try {
+                            const { data, error } = await supabase.rpc("regenerate_invite_code", {
+                              p_group_id: id,
+                              p_user_id: user?.id,
+                            });
+                            if (error) throw error;
+                            queryClient.invalidateQueries({ queryKey: ["group", id] });
+                            showToast("Invite code regenerated.", "success");
+                          } catch (e: any) {
+                            showToast(e.message || "Failed to regenerate code", "error");
+                          } finally {
+                            setIsRegenerating(false);
+                          }
+                        }}
+                        disabled={isRegenerating}
+                        className="p-1.5 bg-white/5 border border-white/10 rounded-lg active:scale-95"
+                      >
+                        {isRegenerating ? (
+                          <ActivityIndicator size="small" color="#14E5D4" />
+                        ) : (
+                          <RefreshCw size={12} color="#F59E0B" />
+                        )}
+                      </TouchableOpacity>
+                    )}
                   </View>
                 </View>
-              )}
+              </View>
 
               {/* Quick Stats Header widget */}
               {activeTab === "overview" &&
@@ -892,92 +920,7 @@ export default function GroupDetail() {
                 </View>
               )}
 
-              {/* Invite Friends Card in Members Tab */}
-              {activeTab === "members" && (
-                <View className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-5 mb-6 shadow-lg">
-                  <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest mb-3">
-                    Invite Friends
-                  </Text>
 
-                  {/* Invite Code Display */}
-                  <View className="items-center bg-white/5 border-[0.5px] border-white/10 rounded-xl p-4 mb-4">
-                    <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-widest mb-1">
-                      Invite Code
-                    </Text>
-                    <Text className="text-white text-2xl font-black tracking-[5px]">
-                      {group.invite_code || "—"}
-                    </Text>
-                  </View>
-
-                  {/* Action Buttons Row */}
-                  <View className="flex-row gap-2">
-                    {/* Copy */}
-                    <TouchableOpacity
-                      onPress={async () => {
-                        Theme.haptics.light();
-                        const code = group.invite_code || group.id;
-                        await Clipboard.setStringAsync(code);
-                        showToast("Invite code copied.", "success");
-                      }}
-                      className="flex-1 flex-row items-center justify-center bg-white/5 border-[0.5px] border-white/10 py-3 rounded-xl active:scale-95"
-                    >
-                      <Copy size={14} color="#14E5D4" />
-                      <Text className="text-white text-xs font-bold ml-1.5">Copy Code</Text>
-                    </TouchableOpacity>
-
-                    {/* Share */}
-                    <TouchableOpacity
-                      onPress={async () => {
-                        Theme.haptics.light();
-                        const code = group.invite_code || group.id;
-                        try {
-                          await Share.share({
-                            message: `Join my hiSaab group!\n\nGroup: ${group.name}\nInvite Code: ${code}\n\nOpen hiSaab → Groups → Join Group and enter this code.`,
-                          });
-                        } catch {}
-                      }}
-                      className="flex-grow flex-shrink flex-row items-center justify-center bg-white/5 border-[0.5px] border-white/10 py-3 rounded-xl active:scale-95"
-                    >
-                      <Share2 size={14} color="#14E5D4" />
-                      <Text className="text-white text-xs font-bold ml-1.5">Share Invite</Text>
-                    </TouchableOpacity>
-
-                    {/* Regenerate (admin only) */}
-                    {group.created_by === user?.id && (
-                      <TouchableOpacity
-                        onPress={async () => {
-                          Theme.haptics.light();
-                          setIsRegenerating(true);
-                          try {
-                            const { data, error } = await supabase.rpc("regenerate_invite_code", {
-                              p_group_id: id,
-                              p_user_id: user?.id,
-                            });
-                            if (error) throw error;
-                            queryClient.invalidateQueries({ queryKey: ["group", id] });
-                            showToast("Invite code regenerated.", "success");
-                          } catch (e: any) {
-                            showToast(e.message || "Failed to regenerate code", "error");
-                          } finally {
-                            setIsRegenerating(false);
-                          }
-                        }}
-                        disabled={isRegenerating}
-                        className="flex-1 flex-row items-center justify-center bg-white/5 border-[0.5px] border-white/10 py-3 rounded-xl active:scale-95"
-                      >
-                        {isRegenerating ? (
-                          <ActivityIndicator size="small" color="#14E5D4" />
-                        ) : (
-                          <>
-                            <RefreshCw size={14} color="#F59E0B" />
-                            <Text className="text-white text-xs font-bold ml-1.5">New Code</Text>
-                          </>
-                        )}
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                </View>
-              )}
 
               {/* Analytics Tab layout */}
               {activeTab === "analytics" && analyticsData && (

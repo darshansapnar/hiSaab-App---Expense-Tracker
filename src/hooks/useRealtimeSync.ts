@@ -24,21 +24,18 @@ export function useRealtimeSync(groupId?: string) {
   useEffect(() => {
     if (!user?.id) return;
 
-    // Listen to changes on 'expenses' table
-    const expenseChannel = supabase
-      .channel("realtime-expenses")
+    // Listen to changes on 'expenses', 'group_members', and 'groups' tables
+    const groupSyncChannel = supabase
+      .channel("realtime-group-sync")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "expenses" },
         async (payload) => {
           // 1. Instantly refresh active list queries across all caches
-          if (groupId) {
-            queryClient.invalidateQueries({ queryKey: ["group-expenses", groupId] });
-            queryClient.invalidateQueries({ queryKey: ["peer-balances", groupId] });
-          } else {
-            queryClient.invalidateQueries({ queryKey: ["group-expenses"] });
-            queryClient.invalidateQueries({ queryKey: ["peer-balances"] });
-          }
+          queryClient.invalidateQueries({ queryKey: ["group-expenses"] });
+          queryClient.invalidateQueries({ queryKey: ["peer-balances"] });
+          queryClient.invalidateQueries({ queryKey: ["global-peer-balances"] });
+          queryClient.invalidateQueries({ queryKey: ["groups"] });
 
           // 2. Filter alerts: Only show notification reminders if someone else triggered the mutation
           if (payload.eventType === "INSERT") {
@@ -84,10 +81,28 @@ export function useRealtimeSync(groupId?: string) {
           }
         }
       )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "group_members" },
+        async (payload) => {
+          queryClient.invalidateQueries({ queryKey: ["group-members"] });
+          queryClient.invalidateQueries({ queryKey: ["groups"] });
+          queryClient.invalidateQueries({ queryKey: ["peer-balances"] });
+          queryClient.invalidateQueries({ queryKey: ["global-peer-balances"] });
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "groups" },
+        async (payload) => {
+          queryClient.invalidateQueries({ queryKey: ["group"] });
+          queryClient.invalidateQueries({ queryKey: ["groups"] });
+        }
+      )
       .subscribe();
 
     return () => {
-      supabase.removeChannel(expenseChannel);
+      supabase.removeChannel(groupSyncChannel);
     };
   }, [user?.id, groupId, queryClient, showToast]);
 }

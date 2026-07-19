@@ -201,6 +201,7 @@ export default function Groups() {
     onSuccess: () => {
       Theme.haptics.success();
       queryClient.invalidateQueries({ queryKey: ["groups", user?.id] });
+      queryClient.invalidateQueries({ queryKey: ["global-peer-balances", user?.id] });
       showToast("Group deleted successfully", "success");
       setIsDeleteConfirmOpen(false);
       setSelectedGroupForMenu(null);
@@ -240,6 +241,7 @@ export default function Groups() {
       showToast(`Welcome to ${parsed?.group_name || "the group"}!`, "success");
       triggerWittyNotification("member_joined", "New Group Member");
       queryClient.invalidateQueries({ queryKey: ["groups", user?.id] });
+      queryClient.invalidateQueries({ queryKey: ["global-peer-balances", user?.id] });
       setIsJoinOpen(false);
       setJoinCode("");
     } catch (e: any) {
