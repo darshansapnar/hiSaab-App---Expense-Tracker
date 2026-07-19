@@ -53,6 +53,7 @@
     "@emnapi/core": "1.11.2",
     "@emnapi/runtime": "1.11.2",
     "@emnapi/wasi-threads": "1.2.2",
+    "lightningcss-linux-x64-gnu": "1.27.0",
     "@testing-library/react-native": "^14.0.1",
     "@types/jest": "29.5.14",
     "@types/react": "~19.1.10",
