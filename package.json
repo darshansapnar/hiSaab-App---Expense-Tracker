@@ -61,13 +61,15 @@
     "eslint-plugin-prettier": "^5.5.6",
     "husky": "^9.1.7",
     "jest": "29.7.0",
-    "lightningcss-linux-x64-gnu": "1.27.0",
     "lint-staged": "^16.4.0",
     "postcss": "^8.5.19",
     "prettier": "^3.9.5",
     "tailwindcss": "^3.4.19",
     "ts-jest": "^29.0.0",
     "typescript": "~5.9.2"
+  },
+  "optionalDependencies": {
+    "lightningcss-linux-x64-gnu": "1.27.0"
   },
   "scripts": {
     "start": "expo start",
