@@ -719,7 +719,7 @@ export default function Profile() {
               marginTop: 12,
             }}
           >
-            hiSaab v1.0 • Crafted with ☕ & curiosity by Darshan
+            hiSaab v1.0 • Made with ❤️ by DARSHAN
           </Text>
         </View>
       </ScrollView>
