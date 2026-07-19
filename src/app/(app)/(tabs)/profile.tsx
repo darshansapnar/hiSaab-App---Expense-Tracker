@@ -703,18 +703,25 @@ export default function Profile() {
           </View>
         </View>
 
-        {/* ── VERSION TAG ── */}
-        <Text
-          style={{
-            color: "#475569",
-            fontSize: 10,
-            fontWeight: "600",
-            textAlign: "center",
-            marginTop: 24,
-          }}
-        >
-          hiSaab v1.0 • Made with ❤️ by DARSHAN
-        </Text>
+        {/* ── VERSION TAG & BRANDING ── */}
+        <View style={{ alignItems: "center", marginTop: 32, marginBottom: 16 }}>
+          <Image
+            source={require("../../../../assets/images/logo.png")}
+            style={{ width: 32, height: 32, borderRadius: 8, opacity: 0.8 }}
+            resizeMode="contain"
+          />
+          <Text
+            style={{
+              color: "#475569",
+              fontSize: 10,
+              fontWeight: "600",
+              textAlign: "center",
+              marginTop: 12,
+            }}
+          >
+            hiSaab v1.0 • Crafted with ☕ & curiosity by Darshan
+          </Text>
+        </View>
       </ScrollView>
 
       {/* ── EDIT PROFILE MODAL ── */}
