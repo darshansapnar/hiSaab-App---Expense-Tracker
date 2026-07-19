@@ -1314,7 +1314,7 @@ export default function GroupDetail() {
               <View className="py-12 items-center justify-center px-4 bg-[#151E2E] rounded-2xl border-[0.5px] border-white/5 shadow-md">
                 <AlertCircle size={28} color="#94A3B8" className="mb-2" />
                 <Text className="text-white text-base font-bold text-center mb-1">
-                  {activeTab === "expenses"
+                  {activeTab === "expenses" || activeTab === "overview"
                     ? "No expenses yet"
                     : activeTab === "balances"
                       ? "All settled up!"
@@ -1323,7 +1323,7 @@ export default function GroupDetail() {
                         : "No members"}
                 </Text>
                 <Text className="text-[#94A3B8] text-xs text-center leading-relaxed">
-                  {activeTab === "expenses"
+                  {activeTab === "expenses" || activeTab === "overview"
                     ? "Tap the '+' button below to log your first shared expense."
                     : activeTab === "balances"
                       ? "Excellent work! Everyone in the group is squared away."
