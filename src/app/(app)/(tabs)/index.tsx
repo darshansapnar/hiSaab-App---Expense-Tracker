@@ -193,36 +193,6 @@ export default function Dashboard() {
     enabled: !!user?.id,
   });
 
-  // 5. Fetch all-time group expenses for summary and insights
-  const { data: groupExpenses, isLoading: isGroupExpensesLoading } = useQuery({
-    queryKey: ["dashboard-group-expenses", user?.id],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("expenses")
-        .select("*, payer:profiles(*), category:categories(*), splits:expense_splits(*, debtor:profiles(*))")
-        .order("expense_date", { ascending: false });
-
-      if (error) throw error;
-      return (data || []) as any[];
-    },
-    enabled: !!user?.id,
-  });
-
-  // 6. Fetch all-time tiffin logs for summary
-  const { data: tiffinLogs, isLoading: isTiffinLoading } = useQuery({
-    queryKey: ["dashboard-tiffin-logs", user?.id],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("tiffin_logs")
-        .select("*")
-        .eq("profile_id", user?.id);
-
-      if (error) throw error;
-      return (data || []) as any[];
-    },
-    enabled: !!user?.id,
-  });
-
   // Re-fetch handler
   const onRefresh = useCallback(async () => {
     setIsRefreshing(true);
@@ -230,8 +200,6 @@ export default function Dashboard() {
       queryClient.invalidateQueries({ queryKey: ["dashboard-groups-latest", user?.id] }),
       queryClient.invalidateQueries({ queryKey: ["dashboard-personal-expenses", user?.id] }),
       queryClient.invalidateQueries({ queryKey: ["dashboard-peer-balances", user?.id] }),
-      queryClient.invalidateQueries({ queryKey: ["dashboard-group-expenses", user?.id] }),
-      queryClient.invalidateQueries({ queryKey: ["dashboard-tiffin-logs", user?.id] }),
     ]);
     setIsRefreshing(false);
   }, [queryClient, user?.id]);
@@ -490,224 +458,6 @@ export default function Dashboard() {
   const latestExpenses = useMemo(() => {
     return (personalExpenses || []).slice(0, 5);
   }, [personalExpenses]);
-
-  const [summaryFilter, setSummaryFilter] = useState<"this_month" | "last_month" | "last_3_months" | "this_year" | "all">("this_month");
-
-  const summaryData = useMemo(() => {
-    const now = new Date();
-    let startDate = new Date(0);
-    let endDate = new Date();
-
-    if (summaryFilter === "this_month") {
-      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-    } else if (summaryFilter === "last_month") {
-      startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
-    } else if (summaryFilter === "last_3_months") {
-      startDate = new Date(now.getFullYear(), now.getMonth() - 2, 1);
-    } else if (summaryFilter === "this_year") {
-      startDate = new Date(now.getFullYear(), 0, 1);
-    }
-
-    const startMs = startDate.getTime();
-    const endMs = endDate.getTime();
-
-    const isInRange = (dateStr: string) => {
-      const ms = new Date(dateStr).getTime();
-      return ms >= startMs && ms <= endMs;
-    };
-
-    const filteredPersonal = (personalExpenses || []).filter((e) => isInRange(e.expense_date));
-    const filteredGroupExpenses = (groupExpenses || []).filter((e) => isInRange(e.expense_date));
-    const filteredTiffin = (tiffinLogs || []).filter((log) => isInRange(log.log_date));
-
-    const personalCount = filteredPersonal.length;
-    const personalSpent = filteredPersonal.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
-
-    let groupSpentAsDebtor = 0;
-    let groupPaidAsPayer = 0;
-    let youOwe = 0;
-    let youReceive = 0;
-    let settlementsMade = 0;
-    let settlementsCount = 0;
-    const activeGroupIds = new Set<string>();
-
-    const nonSettlementGroupExpenses = filteredGroupExpenses.filter((e) => !e.is_settlement);
-    const settlementGroupExpenses = filteredGroupExpenses.filter((e) => e.is_settlement);
-
-    nonSettlementGroupExpenses.forEach((e) => {
-      activeGroupIds.add(e.group_id);
-      const userSplit = e.splits?.find((s: any) => s.debtor_id === user?.id);
-      const userShare = userSplit ? Number(userSplit.amount) || 0 : 0;
-      
-      groupSpentAsDebtor += userShare;
-
-      if (e.paid_by === user?.id) {
-        groupPaidAsPayer += Number(e.amount) || 0;
-        youReceive += (Number(e.amount) || 0) - userShare;
-      } else {
-        youOwe += userShare;
-      }
-    });
-
-    settlementGroupExpenses.forEach((e) => {
-      activeGroupIds.add(e.group_id);
-      const involvesUser = e.paid_by === user?.id || e.splits?.some((s: any) => s.debtor_id === user?.id);
-      if (involvesUser) {
-        settlementsMade += Number(e.amount) || 0;
-        settlementsCount++;
-      }
-    });
-
-    const totalSpent = personalSpent + groupSpentAsDebtor;
-    const totalPaidByYou = personalSpent + groupPaidAsPayer;
-    const netBalance = youReceive - youOwe;
-    const totalExpensesCount = personalCount + nonSettlementGroupExpenses.filter((e) => e.paid_by === user?.id).length;
-
-    let breakfasts = 0;
-    let dinners = 0;
-    const loggedDays = filteredTiffin.length;
-    
-    filteredTiffin.forEach((log) => {
-      if (log.has_breakfast) breakfasts++;
-      if (log.has_dinner) dinners++;
-    });
-
-    const tiffinMealsTaken = breakfasts + dinners;
-    const breakfastRate = 30;
-    const dinnerRate = 30;
-    const tiffinSpent = breakfasts * breakfastRate + dinners * dinnerRate;
-    const tiffinMissed = (loggedDays * 2) - tiffinMealsTaken;
-    const tiffinAvg = tiffinMealsTaken > 0 ? tiffinSpent / tiffinMealsTaken : 0;
-
-    const categoryTotals: Record<string, number> = {};
-    const groupTotals: Record<string, number> = {};
-    let biggestExpenseAmount = 0;
-    let biggestExpenseDescription = "None";
-    const groupCounts: Record<string, number> = {};
-
-    filteredPersonal.forEach((e) => {
-      const cat = e.category?.name || "Other";
-      categoryTotals[cat] = (categoryTotals[cat] || 0) + (Number(e.amount) || 0);
-      if ((Number(e.amount) || 0) > biggestExpenseAmount) {
-        biggestExpenseAmount = Number(e.amount) || 0;
-        biggestExpenseDescription = e.description || cat;
-      }
-    });
-
-    nonSettlementGroupExpenses.forEach((e) => {
-      const cat = e.category?.name || "Other";
-      const userSplit = e.splits?.find((s: any) => s.debtor_id === user?.id);
-      const userShare = userSplit ? Number(userSplit.amount) || 0 : 0;
-      categoryTotals[cat] = (categoryTotals[cat] || 0) + userShare;
-
-      const groupName = e.group_name || "Group";
-      groupTotals[groupName] = (groupTotals[groupName] || 0) + userShare;
-      groupCounts[groupName] = (groupCounts[groupName] || 0) + 1;
-
-      if (userShare > biggestExpenseAmount) {
-        biggestExpenseAmount = userShare;
-        biggestExpenseDescription = e.description || cat;
-      }
-    });
-
-    let highestCategoryName = "None";
-    let maxCategorySpent = 0;
-    Object.entries(categoryTotals).forEach(([cat, amt]) => {
-      if (amt > maxCategorySpent) {
-        maxCategorySpent = amt;
-        highestCategoryName = cat;
-      }
-    });
-
-    let highestGroupName = "None";
-    let maxGroupSpent = 0;
-    Object.entries(groupTotals).forEach(([grp, amt]) => {
-      if (amt > maxGroupSpent) {
-        maxGroupSpent = amt;
-        highestGroupName = grp;
-      }
-    });
-
-    let mostActiveGroupName = "None";
-    let maxGroupCount = 0;
-    Object.entries(groupCounts).forEach(([grp, count]) => {
-      if (count > maxGroupCount) {
-        maxGroupCount = count;
-        mostActiveGroupName = grp;
-      }
-    });
-
-    const averageExpense = totalExpensesCount > 0 ? totalSpent / totalExpensesCount : 0;
-
-    const groupChartData = Object.entries(groupTotals)
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 5);
-
-    const categoryChartData = Object.entries(categoryTotals)
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 5);
-
-    const trendChartData: { monthName: string; amount: number }[] = [];
-    for (let i = 4; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const monthLabel = d.toLocaleString("en-US", { month: "short" });
-      const mStart = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
-      const mEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59).getTime();
-
-      const pSum = (personalExpenses || [])
-        .filter((e) => {
-          const t = new Date(e.expense_date).getTime();
-          return t >= mStart && t <= mEnd;
-        })
-        .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
-
-      const gSum = (groupExpenses || [])
-        .filter((e) => {
-          const t = new Date(e.expense_date).getTime();
-          return !e.is_settlement && t >= mStart && t <= mEnd;
-        })
-        .reduce((sum, e) => {
-          const userSplit = e.splits?.find((s: any) => s.debtor_id === user?.id);
-          return sum + (userSplit ? Number(userSplit.amount) || 0 : 0);
-        }, 0);
-
-      trendChartData.push({ monthName: monthLabel, amount: pSum + gSum });
-    }
-
-    return {
-      personalCount,
-      personalSpent,
-      totalSpent,
-      totalPaidByYou,
-      youOwe,
-      youReceive,
-      settlementsMade,
-      settlementsCount,
-      activeGroupsCount: activeGroupIds.size,
-      netBalance,
-      totalExpensesCount,
-      tiffinMealsTaken,
-      tiffinMissed,
-      tiffinSpent,
-      tiffinAvg,
-      highestCategoryName,
-      maxCategorySpent,
-      highestGroupName,
-      maxGroupSpent,
-      biggestExpenseAmount,
-      biggestExpenseDescription,
-      mostActiveGroupName,
-      averageExpense,
-      groupChartData,
-      categoryChartData,
-      trendChartData,
-      hasAnyData: personalCount > 0 || nonSettlementGroupExpenses.length > 0 || filteredTiffin.length > 0,
-    };
-  }, [summaryFilter, personalExpenses, groupExpenses, tiffinLogs, user?.id]);
-
   const getInitials = () => {
     const name = profile?.display_name || "";
     const parts = name.trim().split(" ");
@@ -820,9 +570,12 @@ export default function Dashboard() {
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: Colors.background }}>
+    <SafeAreaView
+      edges={["top", "left", "right"]}
+      style={{ flex: 1, backgroundColor: Colors.background }}
+    >
       <ScrollView
-        contentContainerStyle={{ paddingBottom: 40 }}
+        contentContainerStyle={{ paddingBottom: 110 }}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
@@ -988,110 +741,110 @@ export default function Dashboard() {
                 </Text>
               )}
             </View>
- 
-             {/* Card 2: To Pay */}
-             <View
-               style={{
-                 backgroundColor: Colors.surface,
-                 borderWidth: 0.5,
-                 borderColor: "rgba(255,255,255,0.05)",
-                 borderRadius: 16,
-                 padding: 12,
-                 width: "48%",
-                 flexGrow: 1,
-               }}
-             >
-               <View className="w-8 h-8 rounded-lg bg-[#EF4444]/10 justify-center items-center mb-2.5">
-                 <ArrowUpRight size={16} color="#EF4444" />
-               </View>
-               <Text
-                 style={{
-                   color: "#94A3B8",
-                   fontSize: 10,
-                   fontWeight: "700",
-                   textTransform: "uppercase",
-                 }}
-               >
-                 To Pay
-               </Text>
-               {isPeerBalancesLoading ? (
-                 <Skeleton width="50%" height={16} borderRadius={4} style={{ marginTop: 6 }} />
-               ) : (
-                 <Text style={{ color: "#FFFFFF", fontSize: 18, fontWeight: "900", marginTop: 2 }}>
-                   ₹{balanceSums.toPay.toFixed(0)}
-                 </Text>
-               )}
-             </View>
- 
-             {/* Card 3: To Receive */}
-             <View
-               style={{
-                 backgroundColor: Colors.surface,
-                 borderWidth: 0.5,
-                 borderColor: "rgba(255,255,255,0.05)",
-                 borderRadius: 16,
-                 padding: 12,
-                 width: "48%",
-                 flexGrow: 1,
-               }}
-             >
-               <View className="w-8 h-8 rounded-lg bg-[#22C55E]/10 justify-center items-center mb-2.5">
-                 <ArrowDownLeft size={16} color="#22C55E" />
-               </View>
-               <Text
-                 style={{
-                   color: "#94A3B8",
-                   fontSize: 10,
-                   fontWeight: "700",
-                   textTransform: "uppercase",
-                 }}
-               >
-                 To Receive
-               </Text>
-               {isPeerBalancesLoading ? (
-                 <Skeleton width="50%" height={16} borderRadius={4} style={{ marginTop: 6 }} />
-               ) : (
-                 <Text style={{ color: "#FFFFFF", fontSize: 18, fontWeight: "900", marginTop: 2 }}>
-                   ₹{balanceSums.toReceive.toFixed(0)}
-                 </Text>
-               )}
-             </View>
- 
-             {/* Card 4: Transactions count */}
-             <View
-               style={{
-                 backgroundColor: Colors.surface,
-                 borderWidth: 0.5,
-                 borderColor: "rgba(255,255,255,0.05)",
-                 borderRadius: 16,
-                 padding: 12,
-                 width: "48%",
-                 flexGrow: 1,
-               }}
-             >
-               <View className="w-8 h-8 rounded-lg bg-[#818CF8]/10 justify-center items-center mb-2.5">
-                 <Clock size={16} color="#818CF8" />
-               </View>
-               <Text
-                 style={{
-                   color: "#94A3B8",
-                   fontSize: 10,
-                   fontWeight: "700",
-                   textTransform: "uppercase",
-                 }}
-               >
-                 Transactions
-               </Text>
-               {isExpensesLoading ? (
-                 <Skeleton width="40%" height={16} borderRadius={4} style={{ marginTop: 6 }} />
-               ) : (
-                 <Text style={{ color: "#FFFFFF", fontSize: 18, fontWeight: "900", marginTop: 2 }}>
-                   {stats.count}
-                 </Text>
-               )}
-             </View>
-           </View>
-         </View>
+
+            {/* Card 2: To Pay */}
+            <View
+              style={{
+                backgroundColor: Colors.surface,
+                borderWidth: 0.5,
+                borderColor: "rgba(255,255,255,0.05)",
+                borderRadius: 16,
+                padding: 12,
+                width: "48%",
+                flexGrow: 1,
+              }}
+            >
+              <View className="w-8 h-8 rounded-lg bg-[#EF4444]/10 justify-center items-center mb-2.5">
+                <ArrowUpRight size={16} color="#EF4444" />
+              </View>
+              <Text
+                style={{
+                  color: "#94A3B8",
+                  fontSize: 10,
+                  fontWeight: "700",
+                  textTransform: "uppercase",
+                }}
+              >
+                To Pay
+              </Text>
+              {isPeerBalancesLoading ? (
+                <Skeleton width="50%" height={16} borderRadius={4} style={{ marginTop: 6 }} />
+              ) : (
+                <Text style={{ color: "#FFFFFF", fontSize: 18, fontWeight: "900", marginTop: 2 }}>
+                  ₹{balanceSums.toPay.toFixed(0)}
+                </Text>
+              )}
+            </View>
+
+            {/* Card 3: To Receive */}
+            <View
+              style={{
+                backgroundColor: Colors.surface,
+                borderWidth: 0.5,
+                borderColor: "rgba(255,255,255,0.05)",
+                borderRadius: 16,
+                padding: 12,
+                width: "48%",
+                flexGrow: 1,
+              }}
+            >
+              <View className="w-8 h-8 rounded-lg bg-[#22C55E]/10 justify-center items-center mb-2.5">
+                <ArrowDownLeft size={16} color="#22C55E" />
+              </View>
+              <Text
+                style={{
+                  color: "#94A3B8",
+                  fontSize: 10,
+                  fontWeight: "700",
+                  textTransform: "uppercase",
+                }}
+              >
+                To Receive
+              </Text>
+              {isPeerBalancesLoading ? (
+                <Skeleton width="50%" height={16} borderRadius={4} style={{ marginTop: 6 }} />
+              ) : (
+                <Text style={{ color: "#FFFFFF", fontSize: 18, fontWeight: "900", marginTop: 2 }}>
+                  ₹{balanceSums.toReceive.toFixed(0)}
+                </Text>
+              )}
+            </View>
+
+            {/* Card 4: Transactions count */}
+            <View
+              style={{
+                backgroundColor: Colors.surface,
+                borderWidth: 0.5,
+                borderColor: "rgba(255,255,255,0.05)",
+                borderRadius: 16,
+                padding: 12,
+                width: "48%",
+                flexGrow: 1,
+              }}
+            >
+              <View className="w-8 h-8 rounded-lg bg-[#818CF8]/10 justify-center items-center mb-2.5">
+                <Clock size={16} color="#818CF8" />
+              </View>
+              <Text
+                style={{
+                  color: "#94A3B8",
+                  fontSize: 10,
+                  fontWeight: "700",
+                  textTransform: "uppercase",
+                }}
+              >
+                Transactions
+              </Text>
+              {isExpensesLoading ? (
+                <Skeleton width="40%" height={16} borderRadius={4} style={{ marginTop: 6 }} />
+              ) : (
+                <Text style={{ color: "#FFFFFF", fontSize: 18, fontWeight: "900", marginTop: 2 }}>
+                  {stats.count}
+                </Text>
+              )}
+            </View>
+          </View>
+        </View>
 
         {/* ── QUICK ACTIONS ── */}
         <View className="px-6 mb-6">
@@ -1316,258 +1069,6 @@ export default function Dashboard() {
               </Text>
             </TouchableOpacity>
           </View>
-        </View>
-
-        {/* ── MONTHLY SUMMARY & INSIGHTS ── */}
-        <View className="px-6 mb-6">
-          <View className="flex-row justify-between items-center mb-4">
-            <Text className="text-white text-lg font-black tracking-tighter">
-              📊 Summary & Insights
-            </Text>
-          </View>
-
-          {/* Filter Pills scrollable bar */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            className="flex-row mb-4"
-            contentContainerStyle={{ gap: 8 }}
-          >
-            {[
-              { id: "this_month", label: "This Month" },
-              { id: "last_month", label: "Last Month" },
-              { id: "last_3_months", label: "Last 3 Docs" },
-              { id: "this_year", label: "This Year" },
-              { id: "all", label: "All Time" },
-            ].map((p) => {
-              const active = summaryFilter === p.id;
-              return (
-                <TouchableOpacity
-                  key={p.id}
-                  onPress={() => {
-                    Theme.haptics.light();
-                    setSummaryFilter(p.id as any);
-                  }}
-                  style={{
-                    backgroundColor: active ? "rgba(20, 229, 212, 0.1)" : "rgba(21, 30, 46, 0.4)",
-                    borderColor: active ? "rgba(20, 229, 212, 0.4)" : "rgba(255, 255, 255, 0.05)",
-                    borderWidth: 1,
-                    paddingHorizontal: 16,
-                    paddingVertical: 8,
-                    borderRadius: 9999,
-                  }}
-                >
-                  <Text
-                    style={{
-                      fontSize: 12,
-                      fontWeight: "700",
-                      color: active ? "#14E5D4" : "#94A3B8",
-                    }}
-                  >
-                    {p.id === "last_3_months" ? "Last 3 Months" : p.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-
-          {/* Empty State */}
-          {!summaryData.hasAnyData ? (
-            <View className="bg-[#151E2E]/40 border-[0.5px] border-white/5 rounded-2xl p-6 items-center justify-center">
-              <Text className="text-white text-sm font-semibold mb-1">
-                No expenses this month.
-              </Text>
-              <Text className="text-[#94A3B8] text-xs text-center">
-                Start by adding your first expense.
-              </Text>
-            </View>
-          ) : (
-            <View style={{ gap: 16 }}>
-              {/* Summary Card */}
-              <View className="bg-[#151E2E]/80 border-[0.5px] border-white/5 rounded-2xl p-5 shadow-lg">
-                <Text className="text-white font-bold text-sm mb-4">
-                  📅 {
-                    summaryFilter === "this_month"
-                      ? new Date().toLocaleString("en-US", { month: "long" })
-                      : summaryFilter === "last_month"
-                      ? new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1).toLocaleString("en-US", { month: "long" })
-                      : summaryFilter === "last_3_months"
-                      ? "Last 3 Months"
-                      : summaryFilter === "this_year"
-                      ? "This Year"
-                      : "All Time"
-                  } Summary
-                </Text>
-
-                <View style={{ gap: 12 }}>
-                  <View className="flex-row justify-between items-center">
-                    <Text className="text-[#94A3B8] text-xs">💸 Total Spent</Text>
-                    <Text className="text-white font-bold text-xs">₹{summaryData.totalSpent.toLocaleString("en-IN", { maximumFractionDigits: 0 })}</Text>
-                  </View>
-                  <View className="flex-row justify-between items-center">
-                    <Text className="text-[#94A3B8] text-xs">💳 You Paid</Text>
-                    <Text className="text-white font-bold text-xs">₹{summaryData.totalPaidByYou.toLocaleString("en-IN", { maximumFractionDigits: 0 })}</Text>
-                  </View>
-                  <View className="flex-row justify-between items-center">
-                    <Text className="text-[#94A3B8] text-xs">📥 You Receive</Text>
-                    <Text className="text-[#22C55E] font-bold text-xs">₹{summaryData.youReceive.toLocaleString("en-IN", { maximumFractionDigits: 0 })}</Text>
-                  </View>
-                  <View className="flex-row justify-between items-center">
-                    <Text className="text-[#94A3B8] text-xs">📤 You Owe</Text>
-                    <Text className="text-[#EF4444] font-bold text-xs">₹{summaryData.youOwe.toLocaleString("en-IN", { maximumFractionDigits: 0 })}</Text>
-                  </View>
-                  <View className="flex-row justify-between items-center">
-                    <Text className="text-[#94A3B8] text-xs">🤝 Settlements</Text>
-                    <Text className="text-white font-bold text-xs">₹{summaryData.settlementsMade.toLocaleString("en-IN", { maximumFractionDigits: 0 })}</Text>
-                  </View>
-                  <View className="flex-row justify-between items-center">
-                    <Text className="text-[#94A3B8] text-xs">📋 Expenses</Text>
-                    <Text className="text-white font-bold text-xs">{summaryData.totalExpensesCount}</Text>
-                  </View>
-                  <View className="flex-row justify-between items-center">
-                    <Text className="text-[#94A3B8] text-xs">👥 Groups</Text>
-                    <Text className="text-white font-bold text-xs">{summaryData.activeGroupsCount}</Text>
-                  </View>
-
-                  {/* Net Balance Divider */}
-                  <View className="border-t border-white/5 pt-3 mt-1 flex-row justify-between items-center">
-                    <Text className="text-white font-bold text-xs">Net Balance</Text>
-                    <Text className={`text-sm font-black ${summaryData.netBalance >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}`}>
-                      {summaryData.netBalance >= 0 ? "🟢 +" : "🔴 -"}₹{Math.abs(summaryData.netBalance).toLocaleString("en-IN", { maximumFractionDigits: 0 })}
-                    </Text>
-                  </View>
-                </View>
-              </View>
-
-              {/* Tiffin Summary Card */}
-              {tiffinLogs && tiffinLogs.length > 0 && (
-                <View className="bg-[#151E2E]/80 border-[0.5px] border-white/5 rounded-2xl p-5 shadow-lg">
-                  <Text className="text-white font-bold text-sm mb-4">🍱 Tiffin Summary</Text>
-                  <View style={{ gap: 12 }}>
-                    <View className="flex-row justify-between items-center">
-                      <Text className="text-[#94A3B8] text-xs">Meals Taken</Text>
-                      <Text className="text-white font-bold text-xs">{summaryData.tiffinMealsTaken}</Text>
-                    </View>
-                    <View className="flex-row justify-between items-center">
-                      <Text className="text-[#94A3B8] text-xs">Meals Missed</Text>
-                      <Text className="text-white font-bold text-xs">{summaryData.tiffinMissed >= 0 ? summaryData.tiffinMissed : 0}</Text>
-                    </View>
-                    <View className="flex-row justify-between items-center">
-                      <Text className="text-[#94A3B8] text-xs">Total Spent</Text>
-                      <Text className="text-[#14E5D4] font-bold text-xs">₹{summaryData.tiffinSpent.toLocaleString("en-IN", { maximumFractionDigits: 0 })}</Text>
-                    </View>
-                    <View className="flex-row justify-between items-center">
-                      <Text className="text-[#94A3B8] text-xs">Average/Meal</Text>
-                      <Text className="text-white font-bold text-xs">₹{summaryData.tiffinAvg.toFixed(0)}</Text>
-                    </View>
-                  </View>
-                </View>
-              )}
-
-              {/* Insights Card */}
-              <View className="bg-[#151E2E]/80 border-[0.5px] border-white/5 rounded-2xl p-5 shadow-lg">
-                <Text className="text-white font-bold text-sm mb-4">📈 Insights</Text>
-                <View style={{ gap: 12 }}>
-                  <View className="flex-row items-start">
-                    <Text className="text-white text-xs mr-2">•</Text>
-                    <Text className="text-[#94A3B8] text-xs flex-1">
-                      <Text className="text-white font-bold">{summaryData.highestCategoryName}</Text> was your biggest expense (₹{summaryData.maxCategorySpent.toLocaleString("en-IN", { maximumFractionDigits: 0 })})
-                    </Text>
-                  </View>
-                  <View className="flex-row items-start">
-                    <Text className="text-white text-xs mr-2">•</Text>
-                    <Text className="text-[#94A3B8] text-xs flex-1">
-                      You spent most in <Text className="text-white font-bold">"{summaryData.highestGroupName}"</Text> (₹{summaryData.maxGroupSpent.toLocaleString("en-IN", { maximumFractionDigits: 0 })})
-                    </Text>
-                  </View>
-                  <View className="flex-row items-start">
-                    <Text className="text-white text-xs mr-2">•</Text>
-                    <Text className="text-[#94A3B8] text-xs flex-1">
-                      Largest expense: <Text className="text-white font-bold">{summaryData.biggestExpenseDescription}</Text> (₹{summaryData.biggestExpenseAmount.toLocaleString("en-IN", { maximumFractionDigits: 0 })})
-                    </Text>
-                  </View>
-                  <View className="flex-row items-start">
-                    <Text className="text-white text-xs mr-2">•</Text>
-                    <Text className="text-[#94A3B8] text-xs flex-1">
-                      Average expense: <Text className="text-white font-bold">₹{summaryData.averageExpense.toLocaleString("en-IN", { maximumFractionDigits: 0 })}</Text>
-                    </Text>
-                  </View>
-                </View>
-              </View>
-
-              {/* Charts Card */}
-              <View className="bg-[#151E2E]/80 border-[0.5px] border-white/5 rounded-2xl p-5 shadow-lg" style={{ gap: 24 }}>
-                {/* 1. Monthly Trend Bar */}
-                <View>
-                  <Text className="text-white font-bold text-xs mb-3">📈 Spending Trend</Text>
-                  <View className="h-28 flex-row items-end justify-between px-2 pt-4">
-                    {summaryData.trendChartData.map((d, index) => {
-                      const maxVal = Math.max(...summaryData.trendChartData.map((m) => m.amount), 100);
-                      const pct = Math.max((d.amount / maxVal) * 100, 5);
-                      return (
-                        <View key={index} className="items-center flex-1">
-                          <View
-                            style={{ height: `${pct}%`, backgroundColor: Colors.accentCyan }}
-                            className="w-4 rounded-t-sm shadow-md"
-                          />
-                          <Text className="text-[#94A3B8] text-[8px] font-bold mt-2">{d.monthName}</Text>
-                          <Text className="text-white text-[8px] font-semibold mt-0.5">₹{(d.amount / 1000).toFixed(1)}k</Text>
-                        </View>
-                      );
-                    })}
-                  </View>
-                </View>
-
-                {/* 2. Category-wise Spending */}
-                {summaryData.categoryChartData.length > 0 && (
-                  <View>
-                    <Text className="text-white font-bold text-xs mb-3">🏷️ Category Spending</Text>
-                    <View style={{ gap: 12 }}>
-                      {summaryData.categoryChartData.map((item, index) => {
-                        const maxVal = Math.max(...summaryData.categoryChartData.map((d) => d.value), 1);
-                        const percentage = (item.value / maxVal) * 100;
-                        return (
-                          <View key={index}>
-                            <View className="flex-row justify-between items-center mb-1">
-                              <Text className="text-white text-xs font-semibold">{item.name}</Text>
-                              <Text className="text-[#14E5D4] text-xs font-bold">₹{item.value.toLocaleString("en-IN", { maximumFractionDigits: 0 })}</Text>
-                            </View>
-                            <View className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-                              <View style={{ width: `${percentage}%`, backgroundColor: Colors.accentCyan }} className="h-full rounded-full" />
-                            </View>
-                          </View>
-                        );
-                      })}
-                    </View>
-                  </View>
-                )}
-
-                {/* 3. Group-wise Spending */}
-                {summaryData.groupChartData.length > 0 && (
-                  <View>
-                    <Text className="text-white font-bold text-xs mb-3">👥 Group Spending</Text>
-                    <View style={{ gap: 12 }}>
-                      {summaryData.groupChartData.map((item, index) => {
-                        const maxVal = Math.max(...summaryData.groupChartData.map((d) => d.value), 1);
-                        const percentage = (item.value / maxVal) * 100;
-                        return (
-                          <View key={index}>
-                            <View className="flex-row justify-between items-center mb-1">
-                              <Text className="text-white text-xs font-semibold">{item.name}</Text>
-                              <Text className="text-[#14E5D4] text-xs font-bold">₹{item.value.toLocaleString("en-IN", { maximumFractionDigits: 0 })}</Text>
-                            </View>
-                            <View className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-                              <View style={{ width: `${percentage}%`, backgroundColor: "#9333EA" }} className="h-full rounded-full" />
-                            </View>
-                          </View>
-                        );
-                      })}
-                    </View>
-                  </View>
-                )}
-              </View>
-            </View>
-          )}
         </View>
 
         {/* ── MY GROUPS ── */}

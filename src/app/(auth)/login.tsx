@@ -1,5 +1,13 @@
 import React, { useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, Image, Alert } from "react-native";
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  ActivityIndicator,
+  Image,
+  Alert,
+} from "react-native";
 import { useRouter, Link } from "expo-router";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -69,7 +77,6 @@ export default function Login() {
     setIsGoogleSubmitting(true);
     try {
       const redirectUrl = Linking.createURL("google-auth");
-      console.log("[Google Auth] Generated Redirect URL:", redirectUrl);
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
@@ -244,7 +251,9 @@ export default function Login() {
         {/* Divider */}
         <View className="flex-row items-center my-4">
           <View className="flex-1 h-[0.5px] bg-white/10" />
-          <Text className="text-accentGray text-xs font-bold uppercase tracking-widest mx-4">OR</Text>
+          <Text className="text-accentGray text-xs font-bold uppercase tracking-widest mx-4">
+            OR
+          </Text>
           <View className="flex-1 h-[0.5px] bg-white/10" />
         </View>
 

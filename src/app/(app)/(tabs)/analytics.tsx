@@ -17,11 +17,7 @@ import { supabase } from "../../../services/supabase";
 import { useToastStore } from "../../../store/toastStore";
 import { Theme } from "../../../constants/Theme";
 import { Colors } from "../../../constants/Colors";
-import {
-  AlertTriangle,
-  X,
-  Save,
-} from "lucide-react-native";
+import { AlertTriangle, X, Save } from "lucide-react-native";
 import { Skeleton, SkeletonCard, SkeletonChart } from "../../../components/ui/Skeleton";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -42,7 +38,9 @@ export default function Analytics() {
   const showToast = useToastStore((state) => state.showToast);
 
   const [isEditOpen, setIsEditOpen] = useState(false);
-  const [filter, setFilter] = useState<"today" | "week" | "month" | "last_month" | "year" | "all">("month");
+  const [filter, setFilter] = useState<"this_month" | "last_month" | "this_year" | "all">(
+    "this_month"
+  );
 
   // 1. Fetch budget settings
   const { data: budget, isLoading: isBudgetLoading } = useQuery({
@@ -100,7 +98,9 @@ export default function Analytics() {
       if (!groupIds || groupIds.length === 0) return [];
       const { data, error } = await supabase
         .from("expenses")
-        .select("*, payer:profiles(*), category:categories(*), splits:expense_splits(*, debtor:profiles(*))")
+        .select(
+          "*, payer:profiles(*), category:categories(*), splits:expense_splits(*, debtor:profiles(*))"
+        )
         .in("group_id", groupIds)
         .order("expense_date", { ascending: false });
 
@@ -108,6 +108,21 @@ export default function Analytics() {
       return (data || []) as any[];
     },
     enabled: !!user?.id && groupIds.length > 0,
+  });
+
+  // 5. Fetch all-time tiffin logs for tiffin summary
+  const { data: tiffinLogs, isLoading: isTiffinLoading } = useQuery({
+    queryKey: ["dashboard-tiffin-logs", user?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("tiffin_logs")
+        .select("*")
+        .eq("profile_id", user?.id);
+
+      if (error) throw error;
+      return (data || []) as any[];
+    },
+    enabled: !!user?.id,
   });
 
   const {
@@ -150,310 +165,239 @@ export default function Analytics() {
     },
   });
 
-  // --- TIME RANGE CALCULATOR ---
-  const isWithinRange = (dateStr: string) => {
-    const d = new Date(dateStr);
+  // --- UNIFIED DATA PROCESSOR FOR SUMMARY, TIFFIN, INSIGHTS & CHARTS ---
+  const summaryData = useMemo(() => {
     const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    let startDate = new Date(0);
+    let endDate = new Date();
 
-    switch (filter) {
-      case "today":
-        return d >= startOfToday;
-      case "week": {
-        const startOfWeek = new Date(startOfToday);
-        startOfWeek.setDate(startOfWeek.getDate() - now.getDay());
-        return d >= startOfWeek;
-      }
-      case "month": {
-        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-        return d >= startOfMonth;
-      }
-      case "last_month": {
-        const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-        const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
-        return d >= startOfLastMonth && d <= endOfLastMonth;
-      }
-      case "year": {
-        const startOfYear = new Date(now.getFullYear(), 0, 1);
-        return d >= startOfYear;
-      }
-      case "all":
-      default:
-        return true;
+    if (filter === "this_month") {
+      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    } else if (filter === "last_month") {
+      startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+    } else if (filter === "this_year") {
+      startDate = new Date(now.getFullYear(), 0, 1);
     }
-  };
 
-  // --- CLIENT-SIDE AGGREGATIONS ---
-  const filteredPersonal = useMemo(
-    () => personalExpenses?.filter((e) => isWithinRange(e.expense_date)) || [],
-    [personalExpenses, filter]
-  );
+    const startMs = startDate.getTime();
+    const endMs = endDate.getTime();
 
-  const filteredGroup = useMemo(
-    () => groupExpenses?.filter((e) => isWithinRange(e.expense_date)) || [],
-    [groupExpenses, filter]
-  );
+    const isInRange = (dateStr: string) => {
+      const ms = new Date(dateStr).getTime();
+      return ms >= startMs && ms <= endMs;
+    };
 
-  const stats = useMemo(() => {
-    let totalExpenses = 0;
-    let totalYouPaid = 0;
-    let totalYouOwe = 0;
-    let totalYouAreOwed = 0;
-    let numTransactions = 0;
-    let numSettlements = 0;
+    const filteredPersonal = (personalExpenses || []).filter((e) => isInRange(e.expense_date));
+    const filteredGroupExpenses = (groupExpenses || []).filter((e) => isInRange(e.expense_date));
+    const filteredTiffin = (tiffinLogs || []).filter((log) => isInRange(log.log_date));
 
-    filteredPersonal.forEach((exp) => {
-      const amt = Number(exp.amount) || 0;
-      totalYouPaid += amt;
-      totalExpenses += amt;
-      numTransactions += 1;
-    });
+    const personalCount = filteredPersonal.length;
+    const personalSpent = filteredPersonal.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
 
-    filteredGroup.forEach((exp) => {
-      const isSettlement = exp.is_settlement;
-      const amt = Number(exp.amount) || 0;
-      const payerId = exp.paid_by;
+    let groupSpentAsDebtor = 0;
+    let groupPaidAsPayer = 0;
+    let youOwe = 0;
+    let youReceive = 0;
+    let settlementsMade = 0;
+    let settlementsCount = 0;
+    const activeGroupIds = new Set<string>();
 
-      if (isSettlement) {
-        numSettlements += 1;
-        return;
-      }
+    const nonSettlementGroupExpenses = filteredGroupExpenses.filter((e) => !e.is_settlement);
+    const settlementGroupExpenses = filteredGroupExpenses.filter((e) => e.is_settlement);
 
-      numTransactions += 1;
+    nonSettlementGroupExpenses.forEach((e) => {
+      activeGroupIds.add(e.group_id);
+      const userSplit = e.splits?.find((s: any) => s.debtor_id === user?.id);
+      const userShare = userSplit ? Number(userSplit.amount) || 0 : 0;
 
-      if (payerId === user?.id) {
-        totalYouPaid += amt;
-        const ownSplit = exp.splits?.find((s: any) => s.debtor_id === user?.id);
-        if (ownSplit) {
-          totalExpenses += Number(ownSplit.amount) || 0;
-        }
-        exp.splits?.forEach((split: any) => {
-          if (split.debtor_id !== user?.id) {
-            totalYouAreOwed += Number(split.amount) || 0;
-          }
-        });
+      groupSpentAsDebtor += userShare;
+
+      if (e.paid_by === user?.id) {
+        groupPaidAsPayer += Number(e.amount) || 0;
+        youReceive += (Number(e.amount) || 0) - userShare;
       } else {
-        const ownSplit = exp.splits?.find((s: any) => s.debtor_id === user?.id);
-        if (ownSplit) {
-          const splitAmt = Number(ownSplit.amount) || 0;
-          totalExpenses += splitAmt;
-          totalYouOwe += splitAmt;
-        }
+        youOwe += userShare;
       }
     });
 
-    return {
-      totalExpenses,
-      totalYouPaid,
-      totalYouOwe,
-      totalYouAreOwed,
-      netBalance: totalYouAreOwed - totalYouOwe,
-      numTransactions,
-      numSettlements,
-    };
-  }, [filteredPersonal, filteredGroup, user?.id]);
-
-  // Daily Spending Trend (Last 7 Days)
-  const dailyTrend = useMemo(() => {
-    const days = Array.from({ length: 7 }, (_, i) => {
-      const d = new Date();
-      d.setDate(d.getDate() - (6 - i));
-      return {
-        dateStr: d.toISOString().split("T")[0],
-        label: d.toLocaleDateString("en-IN", { weekday: "short" }),
-        amount: 0,
-      };
-    });
-
-    filteredPersonal.forEach((exp) => {
-      const dateKey = exp.expense_date.split("T")[0];
-      const match = days.find((day) => day.dateStr === dateKey);
-      if (match) {
-        match.amount += Number(exp.amount) || 0;
+    settlementGroupExpenses.forEach((e) => {
+      activeGroupIds.add(e.group_id);
+      const involvesUser =
+        e.paid_by === user?.id || e.splits?.some((s: any) => s.debtor_id === user?.id);
+      if (involvesUser) {
+        settlementsMade += Number(e.amount) || 0;
+        settlementsCount++;
       }
     });
 
-    filteredGroup.forEach((exp) => {
-      if (exp.is_settlement) return;
-      const dateKey = exp.expense_date.split("T")[0];
-      const match = days.find((day) => day.dateStr === dateKey);
-      if (match) {
-        const ownSplit = exp.splits?.find((s: any) => s.debtor_id === user?.id);
-        if (ownSplit) {
-          match.amount += Number(ownSplit.amount) || 0;
-        }
-      }
+    const totalSpent = personalSpent + groupSpentAsDebtor;
+    const totalPaidByYou = personalSpent + groupPaidAsPayer;
+    const netBalance = youReceive - youOwe;
+    const totalExpensesCount =
+      personalCount + nonSettlementGroupExpenses.filter((e) => e.paid_by === user?.id).length;
+
+    let breakfasts = 0;
+    let dinners = 0;
+    const loggedDays = filteredTiffin.length;
+
+    filteredTiffin.forEach((log) => {
+      if (log.has_breakfast) breakfasts++;
+      if (log.has_dinner) dinners++;
     });
 
-    return days;
-  }, [filteredPersonal, filteredGroup, user?.id]);
+    const tiffinMealsTaken = breakfasts + dinners;
+    const breakfastRate = 30;
+    const dinnerRate = 30;
+    const tiffinSpent = breakfasts * breakfastRate + dinners * dinnerRate;
+    const tiffinMissed = loggedDays * 2 - tiffinMealsTaken;
+    const tiffinAvg = tiffinMealsTaken > 0 ? tiffinSpent / tiffinMealsTaken : 0;
 
-  // Category Spending breakdown
-  const categorySpending = useMemo(() => {
-    const cats: Record<string, { amount: number; color: string }> = {};
-
-    filteredPersonal.forEach((exp) => {
-      const name = exp.category?.name || "Other";
-      const color = exp.category?.color_code || "#FFD166";
-      if (!cats[name]) cats[name] = { amount: 0, color };
-      cats[name].amount += Number(exp.amount) || 0;
-    });
-
-    filteredGroup.forEach((exp) => {
-      if (exp.is_settlement) return;
-      const name = exp.category?.name || "Other";
-      const color = exp.category?.color_code || "#FFD166";
-      const ownSplit = exp.splits?.find((s: any) => s.debtor_id === user?.id);
-      if (ownSplit) {
-        if (!cats[name]) cats[name] = { amount: 0, color };
-        cats[name].amount += Number(ownSplit.amount) || 0;
-      }
-    });
-
-    return Object.entries(cats)
-      .map(([name, val]) => ({ name, amount: val.amount, color: val.color }))
-      .sort((a, b) => b.amount - a.amount);
-  }, [filteredPersonal, filteredGroup, user?.id]);
-
-  // Group Spending breakdown
-  const groupSpending = useMemo(() => {
-    const groups: Record<string, number> = {};
-
-    filteredGroup.forEach((exp) => {
-      if (exp.is_settlement) return;
-      const groupName = memberships?.find((m) => m.group_id === grp_id)?.group?.name || "Unknown Group";
-      const grp_id = exp.group_id;
-      const ownSplit = exp.splits?.find((s: any) => s.debtor_id === user?.id);
-      if (ownSplit) {
-        groups[groupName] = (groups[groupName] || 0) + (Number(ownSplit.amount) || 0);
-      }
-    });
-
-    return Object.entries(groups)
-      .map(([name, amount]) => ({ name, amount }))
-      .sort((a, b) => b.amount - a.amount);
-  }, [filteredGroup, memberships, user?.id]);
-
-  // Weekly spending trend (Last 4 Weeks)
-  const weeklyTrend = useMemo(() => {
-    const weeks = Array.from({ length: 4 }, (_, i) => {
-      const now = new Date();
-      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (3 - i) * 7);
-      const end = new Date(start);
-      end.setDate(end.getDate() + 6);
-      return {
-        start,
-        end,
-        label: `Wk ${i + 1}`,
-        amount: 0,
-      };
-    });
-
-    filteredPersonal.forEach((exp) => {
-      const expDate = new Date(exp.expense_date);
-      const match = weeks.find((w) => expDate >= w.start && expDate <= w.end);
-      if (match) {
-        match.amount += Number(exp.amount) || 0;
-      }
-    });
-
-    filteredGroup.forEach((exp) => {
-      if (exp.is_settlement) return;
-      const expDate = new Date(exp.expense_date);
-      const match = weeks.find((w) => expDate >= w.start && expDate <= w.end);
-      if (match) {
-        const ownSplit = exp.splits?.find((s: any) => s.debtor_id === user?.id);
-        if (ownSplit) {
-          match.amount += Number(ownSplit.amount) || 0;
-        }
-      }
-    });
-
-    return weeks;
-  }, [filteredPersonal, filteredGroup, user?.id]);
-
-  // Monthly spending trend (Last 6 Months)
-  const monthlyTrend = useMemo(() => {
-    const months = Array.from({ length: 6 }, (_, i) => {
-      const d = new Date();
-      d.setMonth(d.getMonth() - (5 - i));
-      return {
-        year: d.getFullYear(),
-        month: d.getMonth(),
-        label: d.toLocaleDateString("en-IN", { month: "short" }),
-        amount: 0,
-      };
-    });
-
-    personalExpenses?.forEach((exp) => {
-      const expDate = new Date(exp.expense_date);
-      const match = months.find((m) => m.year === expDate.getFullYear() && m.month === expDate.getMonth());
-      if (match) {
-        match.amount += Number(exp.amount) || 0;
-      }
-    });
-
-    groupExpenses?.forEach((exp) => {
-      if (exp.is_settlement) return;
-      const expDate = new Date(exp.expense_date);
-      const match = months.find((m) => m.year === expDate.getFullYear() && m.month === expDate.getMonth());
-      if (match) {
-        const ownSplit = exp.splits?.find((s: any) => s.debtor_id === user?.id);
-        if (ownSplit) {
-          match.amount += Number(ownSplit.amount) || 0;
-        }
-      }
-    });
-
-    return months;
-  }, [personalExpenses, groupExpenses, user?.id]);
-
-  // Insights Metrics
-  const insights = useMemo(() => {
-    let maxVal = 0;
-    filteredPersonal.forEach((e) => {
-      maxVal = Math.max(maxVal, Number(e.amount) || 0);
-    });
-    filteredGroup.forEach((e) => {
-      if (e.is_settlement) return;
-      const ownSplit = e.splits?.find((s: any) => s.debtor_id === user?.id);
-      if (ownSplit) {
-        maxVal = Math.max(maxVal, Number(ownSplit.amount) || 0);
-      }
-    });
-
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const personalCount = personalExpenses?.filter((e) => new Date(e.expense_date) >= startOfMonth).length || 0;
-    const groupCount = groupExpenses?.filter((e) => !e.is_settlement && new Date(e.expense_date) >= startOfMonth).length || 0;
-
+    const categoryTotals: Record<string, number> = {};
+    const groupTotals: Record<string, number> = {};
+    let biggestExpenseAmount = 0;
+    let biggestExpenseDescription = "None";
     const groupCounts: Record<string, number> = {};
-    filteredGroup.forEach((exp) => {
-      if (exp.is_settlement) return;
-      const groupName = memberships?.find((m) => m.group_id === exp.group_id)?.group?.name || "Unknown Group";
-      groupCounts[groupName] = (groupCounts[groupName] || 0) + 1;
+
+    filteredPersonal.forEach((e) => {
+      const cat = e.category?.name || "Other";
+      categoryTotals[cat] = (categoryTotals[cat] || 0) + (Number(e.amount) || 0);
+      if ((Number(e.amount) || 0) > biggestExpenseAmount) {
+        biggestExpenseAmount = Number(e.amount) || 0;
+        biggestExpenseDescription = e.description || cat;
+      }
     });
-    const mostActiveGroupName = Object.entries(groupCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "N/A";
+
+    nonSettlementGroupExpenses.forEach((e) => {
+      const cat = e.category?.name || "Other";
+      const userSplit = e.splits?.find((s: any) => s.debtor_id === user?.id);
+      const userShare = userSplit ? Number(userSplit.amount) || 0 : 0;
+      categoryTotals[cat] = (categoryTotals[cat] || 0) + userShare;
+
+      const groupName = memberships?.find((m) => m.group_id === e.group_id)?.group?.name || "Group";
+      groupTotals[groupName] = (groupTotals[groupName] || 0) + userShare;
+      groupCounts[groupName] = (groupCounts[groupName] || 0) + 1;
+
+      if (userShare > biggestExpenseAmount) {
+        biggestExpenseAmount = userShare;
+        biggestExpenseDescription = e.description || cat;
+      }
+    });
+
+    let highestCategoryName = "None";
+    let maxCategorySpent = 0;
+    Object.entries(categoryTotals).forEach(([cat, amt]) => {
+      if (amt > maxCategorySpent) {
+        maxCategorySpent = amt;
+        highestCategoryName = cat;
+      }
+    });
+
+    let highestGroupName = "None";
+    let maxGroupSpent = 0;
+    Object.entries(groupTotals).forEach(([grp, amt]) => {
+      if (grp === "Group") return;
+      if (amt > maxGroupSpent) {
+        maxGroupSpent = amt;
+        highestGroupName = grp;
+      }
+    });
+
+    let mostActiveGroupName = "None";
+    let maxGroupCount = 0;
+    Object.entries(groupCounts).forEach(([grp, count]) => {
+      if (count > maxGroupCount) {
+        maxGroupCount = count;
+        mostActiveGroupName = grp;
+      }
+    });
+
+    const averageExpense = totalExpensesCount > 0 ? totalSpent / totalExpensesCount : 0;
+
+    const groupChartData = Object.entries(groupTotals)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 5);
+
+    const categoryChartData = Object.entries(categoryTotals)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 5);
+
+    const trendChartData: { monthName: string; amount: number }[] = [];
+    for (let i = 4; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const monthLabel = d.toLocaleString("en-US", { month: "short" });
+      const mStart = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+      const mEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59).getTime();
+
+      const pSum = (personalExpenses || [])
+        .filter((e) => {
+          const t = new Date(e.expense_date).getTime();
+          return t >= mStart && t <= mEnd;
+        })
+        .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+
+      const gSum = (groupExpenses || [])
+        .filter((e) => {
+          const t = new Date(e.expense_date).getTime();
+          return !e.is_settlement && t >= mStart && t <= mEnd;
+        })
+        .reduce((sum, e) => {
+          const userSplit = e.splits?.find((s: any) => s.debtor_id === user?.id);
+          return sum + (userSplit ? Number(userSplit.amount) || 0 : 0);
+        }, 0);
+
+      trendChartData.push({ monthName: monthLabel, amount: pSum + gSum });
+    }
 
     return {
-      highestCategory: categorySpending[0]?.name || "N/A",
-      highestGroup: groupSpending[0]?.name || "N/A",
-      averageExpense: stats.numTransactions > 0 ? stats.totalExpenses / stats.numTransactions : 0,
-      biggestSingleExpense: maxVal,
-      numExpensesThisMonth: personalCount + groupCount,
-      mostActiveGroup: mostActiveGroupName,
+      personalCount,
+      personalSpent,
+      totalSpent,
+      totalPaidByYou,
+      youOwe,
+      youReceive,
+      settlementsMade,
+      settlementsCount,
+      activeGroupsCount: activeGroupIds.size,
+      netBalance,
+      totalExpensesCount,
+      tiffinMealsTaken,
+      tiffinMissed,
+      tiffinSpent,
+      tiffinAvg,
+      highestCategoryName,
+      maxCategorySpent,
+      highestGroupName,
+      maxGroupSpent,
+      biggestExpenseAmount,
+      biggestExpenseDescription,
+      mostActiveGroupName,
+      averageExpense,
+      groupChartData,
+      categoryChartData,
+      trendChartData,
+      hasAnyData:
+        personalCount > 0 || nonSettlementGroupExpenses.length > 0 || filteredTiffin.length > 0,
     };
-  }, [filteredPersonal, filteredGroup, personalExpenses, groupExpenses, categorySpending, groupSpending, stats, memberships]);
+  }, [filter, personalExpenses, groupExpenses, tiffinLogs, user?.id, memberships]);
 
   // Budget configuration warning analysis
   const budgetLimit = budget?.monthly_limit ? Number(budget.monthly_limit) : 0;
   const now = new Date();
   const curMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const curMonthPersonalTotal = personalExpenses?.filter((e) => new Date(e.expense_date) >= curMonthStart).reduce((sum, e) => sum + Number(e.amount), 0) || 0;
-  const curMonthGroupTotal = groupExpenses?.filter((e) => !e.is_settlement && new Date(e.expense_date) >= curMonthStart).reduce((sum, e) => {
-    const ownSplit = e.splits?.find((s: any) => s.debtor_id === user?.id);
-    return sum + (ownSplit ? Number(ownSplit.amount) || 0 : 0);
-  }, 0) || 0;
+  const curMonthPersonalTotal =
+    personalExpenses
+      ?.filter((e) => new Date(e.expense_date) >= curMonthStart)
+      .reduce((sum, e) => sum + Number(e.amount), 0) || 0;
+  const curMonthGroupTotal =
+    groupExpenses
+      ?.filter((e) => !e.is_settlement && new Date(e.expense_date) >= curMonthStart)
+      .reduce((sum, e) => {
+        const ownSplit = e.splits?.find((s: any) => s.debtor_id === user?.id);
+        return sum + (ownSplit ? Number(ownSplit.amount) || 0 : 0);
+      }, 0) || 0;
 
   const totalSpentCurMonth = curMonthPersonalTotal + curMonthGroupTotal;
   const remainingBudget = Math.max(0, budgetLimit - totalSpentCurMonth);
@@ -490,18 +434,30 @@ export default function Analytics() {
     checkBudgetWarning();
   }, [totalSpentCurMonth, budgetLimit]);
 
-  if (isBudgetLoading || isPersonalLoading || isMembershipsLoading || isGroupLoading) {
+  if (
+    isBudgetLoading ||
+    isPersonalLoading ||
+    isMembershipsLoading ||
+    isGroupLoading ||
+    isTiffinLoading
+  ) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: "#0B1220" }}>
-        <ScrollView className="flex-1 px-6" contentContainerStyle={{ paddingBottom: 50 }}>
+      <SafeAreaView
+        edges={["top", "left", "right"]}
+        style={{ flex: 1, backgroundColor: "#0B1220" }}
+      >
+        <ScrollView className="flex-1 px-6" contentContainerStyle={{ paddingBottom: 110 }}>
           {/* Top Header */}
           <View className="flex-row justify-between items-center mb-6 mt-4">
             <Text className="text-2xl font-black text-white tracking-tighter">Analytics</Text>
-            <TouchableOpacity disabled className="bg-[#151E2E] border-[0.5px] border-white/10 px-4 py-2.5 rounded-xl opacity-50">
+            <TouchableOpacity
+              disabled
+              className="bg-[#151E2E] border-[0.5px] border-white/10 px-4 py-2.5 rounded-xl opacity-50"
+            >
               <Text className="text-white text-xs font-bold">Set Budget</Text>
             </TouchableOpacity>
           </View>
- 
+
           {/* Filters Select row skeleton */}
           <View className="flex-row bg-[#151E2E] border-[0.5px] border-white/5 rounded-xl p-1 mb-6 shadow-md h-10 w-full justify-between items-center px-4">
             <Skeleton width="14%" height="80%" borderRadius={6} />
@@ -510,7 +466,7 @@ export default function Analytics() {
             <Skeleton width="18%" height="80%" borderRadius={6} />
             <Skeleton width="18%" height="80%" borderRadius={6} />
           </View>
- 
+
           {/* Overview Cards (grid of 4 cards) */}
           <View className="flex-row flex-wrap gap-3 mb-6">
             <SkeletonCard height={94} style={{ width: "48%" }} />
@@ -518,14 +474,14 @@ export default function Analytics() {
             <SkeletonCard height={94} style={{ width: "48%" }} />
             <SkeletonCard height={94} style={{ width: "48%" }} />
           </View>
- 
+
           {/* Budget Limit Card */}
           <View className="bg-[#151E2E]/60 border-[0.5px] border-white/5 rounded-2xl p-5 mb-6">
             <Skeleton width="40%" height={12} borderRadius={4} className="mb-3" />
             <Skeleton width="90%" height={8} borderRadius={4} className="mb-2" />
             <Skeleton width="60%" height={10} borderRadius={4} />
           </View>
- 
+
           {/* Chart Skeletons */}
           <View className="space-y-6">
             <SkeletonChart />
@@ -555,32 +511,10 @@ export default function Analytics() {
     warnText = `Caution: Budget usage is currently at ${usagePercentage.toFixed(0)}%!`;
   }
 
-  // Helper to draw clean polar coordinates path for Pie charts
-  const getSlicePath = (startPercent: number, endPercent: number, radius: number) => {
-    const startAngle = startPercent * 2 * Math.PI - Math.PI / 2;
-    const endAngle = endPercent * 2 * Math.PI - Math.PI / 2;
-
-    const x1 = radius + radius * Math.cos(startAngle);
-    const y1 = radius + radius * Math.sin(startAngle);
-    const x2 = radius + radius * Math.cos(endAngle);
-    const y2 = radius + radius * Math.sin(endAngle);
-
-    const largeArcFlag = endPercent - startPercent > 0.5 ? 1 : 0;
-
-    return `M ${radius} ${radius} L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${x2} ${y2} Z`;
-  };
-
-  const personalTotal = filteredPersonal.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
-  const groupTotal = filteredGroup.reduce((sum, e) => {
-    if (e.is_settlement) return sum;
-    const ownSplit = e.splits?.find((s: any) => s.debtor_id === user?.id);
-    return sum + (ownSplit ? Number(ownSplit.amount) || 0 : 0);
-  }, 0);
-
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: "#0B1220" }}>
+    <SafeAreaView edges={["top", "left", "right"]} style={{ flex: 1, backgroundColor: "#0B1220" }}>
       {/* Scrollable Container */}
-      <ScrollView className="flex-1 px-6" contentContainerStyle={{ paddingBottom: 50 }}>
+      <ScrollView className="flex-1 px-6" contentContainerStyle={{ paddingBottom: 110 }}>
         {/* Top Header */}
         <View className="flex-row justify-between items-center mb-6 mt-4">
           <Text className="text-2xl font-black text-white tracking-tighter">Analytics</Text>
@@ -596,41 +530,55 @@ export default function Analytics() {
         </View>
 
         {/* Filters Select row */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-6">
-          <View className="flex-row bg-[#151E2E] border-[0.5px] border-white/5 rounded-xl p-1 shadow-md">
-            {([
-              { id: "today", label: "Today" },
-              { id: "week", label: "This Week" },
-              { id: "month", label: "This Month" },
-              { id: "last_month", label: "Last Month" },
-              { id: "year", label: "This Year" },
-              { id: "all", label: "All Time" },
-            ] as const).map((opt) => (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          className="mb-6"
+          contentContainerStyle={{ gap: 8 }}
+        >
+          {[
+            { id: "this_month", label: "This Month" },
+            { id: "last_month", label: "Last Month" },
+            { id: "this_year", label: "This Year" },
+            { id: "all", label: "All Time" },
+          ].map((opt) => {
+            const active = filter === opt.id;
+            return (
               <TouchableOpacity
                 key={opt.id}
                 onPress={() => {
                   Theme.haptics.light();
-                  setFilter(opt.id);
+                  setFilter(opt.id as any);
                 }}
-                className={`px-3.5 py-2 rounded-lg items-center justify-center mr-1 ${
-                  filter === opt.id ? "bg-white/5 border border-white/10" : ""
-                }`}
+                style={{
+                  backgroundColor: active ? "rgba(20, 229, 212, 0.1)" : "rgba(21, 30, 46, 0.4)",
+                  borderColor: active ? "rgba(20, 229, 212, 0.4)" : "rgba(255, 255, 255, 0.05)",
+                  borderWidth: 1,
+                  paddingHorizontal: 16,
+                  paddingVertical: 8,
+                  borderRadius: 9999,
+                  marginRight: 6,
+                }}
               >
                 <Text
-                  className={`text-xs font-bold ${
-                    filter === opt.id ? "text-[#14E5D4]" : "text-[#94A3B8]"
-                  }`}
+                  style={{
+                    fontSize: 12,
+                    fontWeight: "700",
+                    color: active ? "#14E5D4" : "#94A3B8",
+                  }}
                 >
                   {opt.label}
                 </Text>
               </TouchableOpacity>
-            ))}
-          </View>
+            );
+          })}
         </ScrollView>
 
         {/* Warning Banner */}
         {showWarning && (
-          <View className={`flex-row items-center border-[0.5px] p-4 rounded-2xl mb-6 shadow-md ${warnBg}`}>
+          <View
+            className={`flex-row items-center border-[0.5px] p-4 rounded-2xl mb-6 shadow-md ${warnBg}`}
+          >
             <AlertTriangle size={18} color={warnIconColor} />
             <Text className={`text-xs font-semibold ml-2.5 flex-1 leading-relaxed ${warnColor}`}>
               {warnText}
@@ -646,19 +594,27 @@ export default function Analytics() {
                 <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-widest">
                   Spent (This Month)
                 </Text>
-                <Text className="text-white text-xl font-black mt-1">₹ {totalSpentCurMonth.toFixed(0)}</Text>
+                <Text className="text-white text-xl font-black mt-1">
+                  ₹ {totalSpentCurMonth.toFixed(0)}
+                </Text>
               </View>
               <View className="items-end">
                 <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-widest">
                   Budget Limit
                 </Text>
-                <Text className="text-[#14E5D4] text-xl font-black mt-1">₹ {budgetLimit.toFixed(0)}</Text>
+                <Text className="text-[#14E5D4] text-xl font-black mt-1">
+                  ₹ {budgetLimit.toFixed(0)}
+                </Text>
               </View>
             </View>
             <View className="h-2 bg-white/5 rounded-full overflow-hidden mb-2 border-[0.5px] border-white/5">
               <View
                 className={`h-full rounded-full ${
-                  isExceeded ? "bg-[#EF4444]" : usagePercentage >= 85 ? "bg-[#F59E0B]" : "bg-[#14E5D4]"
+                  isExceeded
+                    ? "bg-[#EF4444]"
+                    : usagePercentage >= 85
+                      ? "bg-[#F59E0B]"
+                      : "bg-[#14E5D4]"
                 }`}
                 style={{ width: `${Math.min(100, usagePercentage)}%` }}
               />
@@ -667,7 +623,9 @@ export default function Analytics() {
               <Text className="text-[#94A3B8] text-[8px] font-bold uppercase">
                 {usagePercentage.toFixed(0)}% Utilized
               </Text>
-              <Text className={`text-[8px] font-bold uppercase ${isExceeded ? "text-[#EF4444]" : "text-[#14E5D4]"}`}>
+              <Text
+                className={`text-[8px] font-bold uppercase ${isExceeded ? "text-[#EF4444]" : "text-[#14E5D4]"}`}
+              >
                 {isExceeded ? "Exceeded Limit" : `₹ ${remainingBudget.toFixed(0)} Remaining`}
               </Text>
             </View>
@@ -675,14 +633,15 @@ export default function Analytics() {
         )}
 
         {/* Global Empty State validation */}
-        {stats.totalExpenses === 0 ? (
+        {!summaryData.hasAnyData ? (
           <View className="py-16 items-center justify-center px-6 bg-[#151E2E] rounded-3xl border-[0.5px] border-white/5 shadow-lg mb-6">
             <Text className="text-3xl mb-4">📊</Text>
             <Text className="text-white text-lg font-black text-center mb-2">
               No Analytics Data Found
             </Text>
             <Text className="text-[#94A3B8] text-xs text-center leading-relaxed mb-6">
-              There is no recorded spending in this time range. Try choosing a different filter, create a new group, or add your first expense split!
+              There is no recorded spending in this time range. Try choosing a different filter,
+              create a new group, or add your first expense split!
             </Text>
             <TouchableOpacity
               onPress={() => {
@@ -695,295 +654,280 @@ export default function Analytics() {
             </TouchableOpacity>
           </View>
         ) : (
-          <>
-            {/* Overview Stats Cards Grid */}
-            <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-widest mb-3">
-              Overview Summary
-            </Text>
-            <View className="flex-row flex-wrap justify-between mb-6">
-              {[
-                { label: "Total Spent", val: `₹${stats.totalExpenses.toFixed(0)}`, color: "text-white" },
-                { label: "You Paid", val: `₹${stats.totalYouPaid.toFixed(0)}`, color: "text-[#14E5D4]" },
-                { label: "You Owe", val: `₹${stats.totalYouOwe.toFixed(0)}`, color: "text-[#EF4444]" },
-                { label: "You Owed", val: `₹${stats.totalYouAreOwed.toFixed(0)}`, color: "text-[#22C55E]" },
-                {
-                  label: "Net Balance",
-                  val: `${stats.netBalance >= 0 ? "+" : "-"}₹${Math.abs(stats.netBalance).toFixed(0)}`,
-                  color: stats.netBalance >= 0.01 ? "text-[#22C55E]" : stats.netBalance < -0.01 ? "text-[#EF4444]" : "text-white",
-                },
-                { label: "Transactions", val: stats.numTransactions.toString(), color: "text-white" },
-                { label: "Settlements", val: stats.numSettlements.toString(), color: "text-white" },
-                { label: "Active Groups", val: groupIds.length.toString(), color: "text-white" },
-              ].map((c) => (
-                <View
-                  key={c.label}
-                  style={{ width: "48%" }}
-                  className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-4 mb-3 shadow-md"
-                >
-                  <Text className="text-[#94A3B8] text-[8px] font-bold uppercase tracking-wider mb-1">
-                    {c.label}
+          <View style={{ gap: 16 }}>
+            {/* Summary Card */}
+            <View className="bg-[#151E2E]/80 border-[0.5px] border-white/5 rounded-2xl p-5 shadow-lg">
+              <Text className="text-white font-bold text-sm mb-4">
+                📅{" "}
+                {filter === "this_month"
+                  ? new Date().toLocaleString("en-US", { month: "long" })
+                  : filter === "last_month"
+                    ? new Date(
+                        new Date().getFullYear(),
+                        new Date().getMonth() - 1,
+                        1
+                      ).toLocaleString("en-US", { month: "long" })
+                    : filter === "this_year"
+                      ? "This Year"
+                      : "All Time"}{" "}
+                Summary
+              </Text>
+
+              <View style={{ gap: 12 }}>
+                <View className="flex-row justify-between items-center">
+                  <Text className="text-[#94A3B8] text-xs">💸 Total Spent</Text>
+                  <Text className="text-white font-bold text-xs">
+                    ₹{summaryData.totalSpent.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
                   </Text>
-                  <Text className={`text-base font-black ${c.color}`}>{c.val}</Text>
                 </View>
-              ))}
+                <View className="flex-row justify-between items-center">
+                  <Text className="text-[#94A3B8] text-xs">💳 You Paid</Text>
+                  <Text className="text-white font-bold text-xs">
+                    ₹
+                    {summaryData.totalPaidByYou.toLocaleString("en-IN", {
+                      maximumFractionDigits: 0,
+                    })}
+                  </Text>
+                </View>
+                <View className="flex-row justify-between items-center">
+                  <Text className="text-[#94A3B8] text-xs">📥 You Receive</Text>
+                  <Text className="text-[#22C55E] font-bold text-xs">
+                    ₹{summaryData.youReceive.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+                  </Text>
+                </View>
+                <View className="flex-row justify-between items-center">
+                  <Text className="text-[#94A3B8] text-xs">📤 You Owe</Text>
+                  <Text className="text-[#EF4444] font-bold text-xs">
+                    ₹{summaryData.youOwe.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+                  </Text>
+                </View>
+                <View className="flex-row justify-between items-center">
+                  <Text className="text-[#94A3B8] text-xs">🤝 Settlements</Text>
+                  <Text className="text-white font-bold text-xs">
+                    ₹
+                    {summaryData.settlementsMade.toLocaleString("en-IN", {
+                      maximumFractionDigits: 0,
+                    })}
+                  </Text>
+                </View>
+                <View className="flex-row justify-between items-center">
+                  <Text className="text-[#94A3B8] text-xs">📋 Expenses</Text>
+                  <Text className="text-white font-bold text-xs">
+                    {summaryData.totalExpensesCount}
+                  </Text>
+                </View>
+                <View className="flex-row justify-between items-center">
+                  <Text className="text-[#94A3B8] text-xs">👥 Groups</Text>
+                  <Text className="text-white font-bold text-xs">
+                    {summaryData.activeGroupsCount}
+                  </Text>
+                </View>
+
+                {/* Net Balance Divider */}
+                <View className="border-t border-white/5 pt-3 mt-1 flex-row justify-between items-center">
+                  <Text className="text-white font-bold text-xs">Net Balance</Text>
+                  <Text
+                    className={`text-sm font-black ${summaryData.netBalance >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}`}
+                  >
+                    {summaryData.netBalance >= 0 ? "🟢 +" : "🔴 -"}₹
+                    {Math.abs(summaryData.netBalance).toLocaleString("en-IN", {
+                      maximumFractionDigits: 0,
+                    })}
+                  </Text>
+                </View>
+              </View>
             </View>
 
-            {/* Daily Trend Line Area Chart */}
-            <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-widest mb-3">
-              Daily Spending Trend (Last 7 Days)
-            </Text>
-            <View className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-5 mb-6 shadow-md items-center">
-              {(() => {
-                const chartHeight = 110;
-                const chartWidth = 280;
-                const maxVal = Math.max(...dailyTrend.map((d) => d.amount), 1);
+            {/* Tiffin Summary Card */}
+            {tiffinLogs && tiffinLogs.length > 0 && (
+              <View className="bg-[#151E2E]/80 border-[0.5px] border-white/5 rounded-2xl p-5 shadow-lg">
+                <Text className="text-white font-bold text-sm mb-4">🍱 Tiffin Summary</Text>
+                <View style={{ gap: 12 }}>
+                  <View className="flex-row justify-between items-center">
+                    <Text className="text-[#94A3B8] text-xs">Meals Taken</Text>
+                    <Text className="text-white font-bold text-xs">
+                      {summaryData.tiffinMealsTaken}
+                    </Text>
+                  </View>
+                  <View className="flex-row justify-between items-center">
+                    <Text className="text-[#94A3B8] text-xs">Meals Missed</Text>
+                    <Text className="text-white font-bold text-xs">
+                      {summaryData.tiffinMissed >= 0 ? summaryData.tiffinMissed : 0}
+                    </Text>
+                  </View>
+                  <View className="flex-row justify-between items-center">
+                    <Text className="text-[#94A3B8] text-xs">Total Spent</Text>
+                    <Text className="text-[#14E5D4] font-bold text-xs">
+                      ₹
+                      {summaryData.tiffinSpent.toLocaleString("en-IN", {
+                        maximumFractionDigits: 0,
+                      })}
+                    </Text>
+                  </View>
+                  <View className="flex-row justify-between items-center">
+                    <Text className="text-[#94A3B8] text-xs">Average/Meal</Text>
+                    <Text className="text-white font-bold text-xs">
+                      ₹{summaryData.tiffinAvg.toFixed(0)}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            )}
 
-                // Compute SVG coordinates
-                const points = dailyTrend.map((d, i) => {
-                  const x = (i / 6) * chartWidth;
-                  const y = chartHeight - (d.amount / maxVal) * (chartHeight - 30) - 15;
-                  return { x, y };
-                });
+            {/* Insights Card */}
+            <View className="bg-[#151E2E]/80 border-[0.5px] border-white/5 rounded-2xl p-5 shadow-lg">
+              <Text className="text-white font-bold text-sm mb-4">📈 Insights</Text>
+              <View style={{ gap: 12 }}>
+                <View className="flex-row items-start">
+                  <Text className="text-white text-xs mr-2">•</Text>
+                  <Text className="text-[#94A3B8] text-xs flex-1">
+                    <Text className="text-white font-bold">{summaryData.highestCategoryName}</Text>{" "}
+                    was your biggest expense (₹
+                    {summaryData.maxCategorySpent.toLocaleString("en-IN", {
+                      maximumFractionDigits: 0,
+                    })}
+                    )
+                  </Text>
+                </View>
+                <View className="flex-row items-start">
+                  <Text className="text-white text-xs mr-2">•</Text>
+                  <Text className="text-[#94A3B8] text-xs flex-1">
+                    You spent most in{" "}
+                    <Text className="text-white font-bold">"{summaryData.highestGroupName}"</Text>{" "}
+                    (₹
+                    {summaryData.maxGroupSpent.toLocaleString("en-IN", {
+                      maximumFractionDigits: 0,
+                    })}
+                    )
+                  </Text>
+                </View>
+                <View className="flex-row items-start">
+                  <Text className="text-white text-xs mr-2">•</Text>
+                  <Text className="text-[#94A3B8] text-xs flex-1">
+                    Largest expense:{" "}
+                    <Text className="text-white font-bold">
+                      {summaryData.biggestExpenseDescription}
+                    </Text>{" "}
+                    (₹
+                    {summaryData.biggestExpenseAmount.toLocaleString("en-IN", {
+                      maximumFractionDigits: 0,
+                    })}
+                    )
+                  </Text>
+                </View>
+                <View className="flex-row items-start">
+                  <Text className="text-white text-xs mr-2">•</Text>
+                  <Text className="text-[#94A3B8] text-xs flex-1">
+                    Average expense:{" "}
+                    <Text className="text-white font-bold">
+                      ₹
+                      {summaryData.averageExpense.toLocaleString("en-IN", {
+                        maximumFractionDigits: 0,
+                      })}
+                    </Text>
+                  </Text>
+                </View>
+              </View>
+            </View>
 
-                const linePath = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
-                const fillPath = `${linePath} L ${chartWidth} ${chartHeight} L 0 ${chartHeight} Z`;
-
-                return (
-                  <View style={{ width: "100%" }}>
-                    <Svg height={chartHeight + 25} width={chartWidth + 20} className="self-center">
-                      <Defs>
-                        <LinearGradient id="glowingArea" x1="0" y1="0" x2="0" y2="1">
-                          <Stop offset="0%" stopColor="#14E5D4" stopOpacity={0.25} />
-                          <Stop offset="100%" stopColor="#14E5D4" stopOpacity={0} />
-                        </LinearGradient>
-                      </Defs>
-                      {/* Grid Horizontal Guide Lines */}
-                      {[0.25, 0.5, 0.75, 1].map((p, idx) => (
-                        <Path
-                          key={idx}
-                          d={`M 0 ${chartHeight * p} L ${chartWidth} ${chartHeight * p}`}
-                          stroke="rgba(255, 255, 255, 0.03)"
-                          strokeWidth={1}
+            {/* Charts Card */}
+            <View
+              className="bg-[#151E2E]/80 border-[0.5px] border-white/5 rounded-2xl p-5 shadow-lg"
+              style={{ gap: 24 }}
+            >
+              {/* 1. Monthly Trend Bar */}
+              <View>
+                <Text className="text-white font-bold text-xs mb-3">📈 Spending Trend</Text>
+                <View className="h-28 flex-row items-end justify-between px-2 pt-4">
+                  {summaryData.trendChartData.map((d, index) => {
+                    const maxVal = Math.max(
+                      ...summaryData.trendChartData.map((m) => m.amount),
+                      100
+                    );
+                    const pct = Math.max((d.amount / maxVal) * 100, 5);
+                    return (
+                      <View key={index} className="items-center flex-1">
+                        <View
+                          style={{ height: `${pct}%`, backgroundColor: Colors.accentCyan }}
+                          className="w-4 rounded-t-sm shadow-md"
                         />
-                      ))}
-                      {/* Gradient Fill */}
-                      <Path d={fillPath} fill="url(#glowingArea)" />
-                      {/* Trend Line */}
-                      <Path d={linePath} fill="none" stroke="#14E5D4" strokeWidth={2.5} />
-                      {/* Interactive Point Indicators */}
-                      {points.map((p, i) => (
-                        <Circle key={i} cx={p.x} cy={p.y} r={3} fill="#14E5D4" stroke="#0B1220" strokeWidth={1} />
-                      ))}
-                    </Svg>
-                    {/* Bottom Label Names */}
-                    <View className="flex-row justify-between mt-1 px-1">
-                      {dailyTrend.map((d, i) => (
-                        <Text key={i} className="text-[#94A3B8] text-[8px] font-bold uppercase w-10 text-center">
-                          {d.label}
+                        <Text className="text-[#94A3B8] text-[8px] font-bold mt-2">
+                          {d.monthName}
                         </Text>
-                      ))}
-                    </View>
-                  </View>
-                );
-              })()}
-            </View>
-
-            {/* Category Pie & Group Horizontal Stack */}
-            <View className="flex-row justify-between mb-6">
-              {/* Category Donut/Pie Chart */}
-              <View style={{ width: "48%" }} className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-4 shadow-md items-center justify-between">
-                <Text className="text-[#94A3B8] text-[8px] font-bold uppercase tracking-wider mb-3 self-start">
-                  Category Breakdown
-                </Text>
-                {categorySpending.length > 0 ? (
-                  <View className="items-center w-full">
-                    <Svg height={100} width={100}>
-                      {(() => {
-                        let cumulativePercent = 0;
-                        return categorySpending.map((cat, idx) => {
-                          const percent = cat.amount / stats.totalExpenses;
-                          const path = getSlicePath(cumulativePercent, cumulativePercent + percent, 50);
-                          cumulativePercent += percent;
-                          return <Path key={idx} d={path} fill={cat.color} />;
-                        });
-                      })()}
-                    </Svg>
-                    <View className="mt-3 w-full space-y-1">
-                      {categorySpending.slice(0, 3).map((cat) => (
-                        <View key={cat.name} className="flex-row items-center">
-                          <View style={{ backgroundColor: cat.color }} className="w-2 h-2 rounded-full mr-1.5" />
-                          <Text className="text-white text-[8px] font-semibold flex-1" numberOfLines={1}>
-                            {cat.name}
-                          </Text>
-                        </View>
-                      ))}
-                    </View>
-                  </View>
-                ) : (
-                  <Text className="text-[#94A3B8] text-[8px] italic py-8">No category data</Text>
-                )}
+                        <Text className="text-white text-[8px] font-semibold mt-0.5">
+                          ₹{(d.amount / 1000).toFixed(1)}k
+                        </Text>
+                      </View>
+                    );
+                  })}
+                </View>
               </View>
 
-              {/* Group-wise Spending */}
-              <View style={{ width: "48%" }} className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-4 shadow-md">
-                <Text className="text-[#94A3B8] text-[8px] font-bold uppercase tracking-wider mb-3">
-                  Group Spending
-                </Text>
-                {groupSpending.length > 0 ? (
-                  <ScrollView style={{ maxHeight: 130 }} showsVerticalScrollIndicator={false} className="space-y-3">
-                    {groupSpending.map((grp) => {
-                      const grpPercent = stats.totalExpenses > 0 ? (grp.amount / stats.totalExpenses) * 100 : 0;
+              {/* 2. Category-wise Spending */}
+              {summaryData.categoryChartData.length > 0 && (
+                <View>
+                  <Text className="text-white font-bold text-xs mb-3">🏷️ Category Spending</Text>
+                  <View style={{ gap: 12 }}>
+                    {summaryData.categoryChartData.map((item, index) => {
+                      const maxVal = Math.max(
+                        ...summaryData.categoryChartData.map((d) => d.value),
+                        1
+                      );
+                      const percentage = (item.value / maxVal) * 100;
                       return (
-                        <View key={grp.name} className="mb-2">
-                          <View className="flex-row justify-between items-center mb-0.5">
-                            <Text className="text-white text-[8px] font-bold flex-1" numberOfLines={1}>
-                              {grp.name}
-                            </Text>
-                            <Text className="text-[#14E5D4] text-[8px] font-black">
-                              ₹{grp.amount.toFixed(0)}
+                        <View key={index}>
+                          <View className="flex-row justify-between items-center mb-1">
+                            <Text className="text-white text-xs font-semibold">{item.name}</Text>
+                            <Text className="text-[#14E5D4] text-xs font-bold">
+                              ₹{item.value.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
                             </Text>
                           </View>
-                          <View className="h-1 bg-white/5 rounded-full overflow-hidden">
-                            <View style={{ width: `${grpPercent}%` }} className="h-full bg-[#14E5D4] rounded-full" />
+                          <View className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                            <View
+                              style={{
+                                width: `${percentage}%`,
+                                backgroundColor: Colors.accentCyan,
+                              }}
+                              className="h-full rounded-full"
+                            />
                           </View>
                         </View>
                       );
                     })}
-                  </ScrollView>
-                ) : (
-                  <View className="flex-1 justify-center items-center py-8">
-                    <Text className="text-[#94A3B8] text-[8px] italic">No group splits spending</Text>
                   </View>
-                )}
-              </View>
-            </View>
+                </View>
+              )}
 
-            {/* Personal vs Group & Weekly breakdown */}
-            <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-widest mb-3">
-              Personal vs Group & Weekly breakdown
-            </Text>
-            <View className="flex-row justify-between mb-6">
-              {/* Personal vs Group Split Donut */}
-              <View style={{ width: "48%" }} className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-4 shadow-md items-center justify-between">
-                <Text className="text-[#94A3B8] text-[8px] font-bold uppercase tracking-wider mb-2 self-start">
-                  Personal vs Group
-                </Text>
-                {personalTotal + groupTotal > 0 ? (
-                  <View className="items-center">
-                    <Svg height={90} width={90}>
-                      {(() => {
-                        const total = personalTotal + groupTotal;
-                        const persPercent = personalTotal / total;
-
-                        const pathPers = getSlicePath(0, persPercent, 45);
-                        const pathGrp = getSlicePath(persPercent, 1.0, 45);
-
-                        return (
-                          <>
-                            <Path d={pathPers} fill="#14E5D4" />
-                            <Path d={pathGrp} fill="#FF9F1C" />
-                            {/* Inner circle for donut styling */}
-                            <Circle cx={45} cy={45} r={22} fill="#151E2E" />
-                          </>
-                        );
-                      })()}
-                    </Svg>
-                    <View className="flex-row space-x-2 mt-2 justify-center w-full">
-                      <View className="flex-row items-center">
-                        <View className="w-1.5 h-1.5 bg-[#14E5D4] rounded-full mr-1" />
-                        <Text className="text-white text-[7px]">Pers</Text>
-                      </View>
-                      <View className="flex-row items-center">
-                        <View className="w-1.5 h-1.5 bg-[#FF9F1C] rounded-full mr-1" />
-                        <Text className="text-white text-[7px]">Group</Text>
-                      </View>
-                    </View>
-                  </View>
-                ) : (
-                  <Text className="text-[#94A3B8] text-[8px] italic py-8">No data found</Text>
-                )}
-              </View>
-
-              {/* Weekly bar columns list */}
-              <View style={{ width: "48%" }} className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-4 shadow-md justify-between">
-                <Text className="text-[#94A3B8] text-[8px] font-bold uppercase tracking-wider mb-2">
-                  Weekly Spending
-                </Text>
-                <View className="flex-row justify-around items-end h-24 pt-2">
-                  {(() => {
-                    const maxWk = Math.max(...weeklyTrend.map((w) => w.amount), 1);
-                    return weeklyTrend.map((wk, idx) => {
-                      const barHt = (wk.amount / maxWk) * 60; // Max 60px height
+              {/* 3. Group-wise Spending */}
+              {summaryData.groupChartData.length > 0 && (
+                <View>
+                  <Text className="text-white font-bold text-xs mb-3">👥 Group Spending</Text>
+                  <View style={{ gap: 12 }}>
+                    {summaryData.groupChartData.map((item, index) => {
+                      const maxVal = Math.max(...summaryData.groupChartData.map((d) => d.value), 1);
+                      const percentage = (item.value / maxVal) * 100;
                       return (
-                        <View key={idx} className="items-center">
-                          <Text className="text-white text-[7px] font-bold mb-1">
-                            ₹{wk.amount.toFixed(0)}
-                          </Text>
-                          <View
-                            style={{ height: Math.max(4, barHt) }}
-                            className="w-4 bg-[#14E5D4] rounded-t-sm"
-                          />
-                          <Text className="text-[#94A3B8] text-[7px] font-bold mt-1.5">
-                            {wk.label}
-                          </Text>
+                        <View key={index}>
+                          <View className="flex-row justify-between items-center mb-1">
+                            <Text className="text-white text-xs font-semibold">{item.name}</Text>
+                            <Text className="text-[#14E5D4] text-xs font-bold">
+                              ₹{item.value.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+                            </Text>
+                          </View>
+                          <View className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                            <View
+                              style={{ width: `${percentage}%`, backgroundColor: "#9333EA" }}
+                              className="h-full rounded-full"
+                            />
+                          </View>
                         </View>
                       );
-                    });
-                  })()}
+                    })}
+                  </View>
                 </View>
-              </View>
+              )}
             </View>
-
-            {/* Monthly Trend Comparative columns */}
-            <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-widest mb-3">
-              Monthly Trend (Last 6 Months)
-            </Text>
-            <View className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-5 mb-6 shadow-md">
-              <View className="flex-row justify-around items-end h-28 pt-2">
-                {(() => {
-                  const maxMth = Math.max(...monthlyTrend.map((m) => m.amount), 1);
-                  return monthlyTrend.map((mth, idx) => {
-                    const barHt = (mth.amount / maxMth) * 65; // Max 65px height
-                    return (
-                      <View key={idx} className="items-center">
-                        <Text className="text-white text-[8px] font-bold mb-1">
-                          ₹{mth.amount.toFixed(0)}
-                        </Text>
-                        <View
-                          style={{ height: Math.max(4, barHt) }}
-                          className="w-5 bg-[#14E5D4] rounded-t-sm"
-                        />
-                        <Text className="text-[#94A3B8] text-[8px] font-bold mt-1.5">
-                          {mth.label}
-                        </Text>
-                      </View>
-                    );
-                  });
-                })()}
-              </View>
-            </View>
-
-            {/* Insights highlights section */}
-            <Text className="text-[#94A3B8] text-[9px] font-bold uppercase tracking-widest mb-3">
-              Key Spending Insights
-            </Text>
-            <View className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-5 mb-6 shadow-md space-y-3">
-              {[
-                { title: "Highest Category", desc: insights.highestCategory, icon: "🏷️" },
-                { title: "Highest Spending Group", desc: insights.highestGroup, icon: "👥" },
-                { title: "Most Active Group", desc: insights.mostActiveGroup, icon: "🔥" },
-                { title: "Average Expense Amount", desc: `₹ ${insights.averageExpense.toFixed(0)}`, icon: "📈" },
-                { title: "Biggest Single Expense", desc: `₹ ${insights.biggestSingleExpense.toFixed(0)}`, icon: "💎" },
-                { title: "Expenses This Month", desc: `${insights.numExpensesThisMonth} transactions`, icon: "📅" },
-              ].map((inst) => (
-                <View key={inst.title} className="flex-row items-center py-1.5 border-b-[0.5px] border-white/5">
-                  <Text className="text-sm mr-2.5">{inst.icon}</Text>
-                  <Text className="text-[#94A3B8] text-xs flex-1">{inst.title}</Text>
-                  <Text className="text-white text-xs font-bold">{inst.desc}</Text>
-                </View>
-              ))}
-            </View>
-          </>
+          </View>
         )}
 
         {/* BUDGET CONFIG MODAL */}
@@ -1038,7 +982,9 @@ export default function Analytics() {
                   ) : (
                     <>
                       <Save size={18} color="#0B1220" />
-                      <Text className="text-[#0B1220] font-black text-base ml-2">Save Budget Limit</Text>
+                      <Text className="text-[#0B1220] font-black text-base ml-2">
+                        Save Budget Limit
+                      </Text>
                     </>
                   )}
                 </TouchableOpacity>

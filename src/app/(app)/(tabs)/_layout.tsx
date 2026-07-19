@@ -14,9 +14,9 @@ export default function TabLayout() {
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: "#161616", // Carbon container surface color
+          backgroundColor: Colors.background, // Matches the deep dark blue/navy screen background color
           borderTopWidth: 0.5,
-          borderTopColor: "#262626",  // Subtle border separator
+          borderTopColor: "rgba(255, 255, 255, 0.08)", // Subtle premium border separator
           height: tabHeight,
           paddingBottom: paddingBottom,
           paddingTop: 8,
@@ -57,9 +57,6 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <User size={20} color={color} />,
         }}
       />
-
-
     </Tabs>
   );
 }
-

@@ -471,7 +471,7 @@ export default function Groups() {
     }, 0);
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: "#0B1220" }}>
+    <SafeAreaView edges={["top", "left", "right"]} style={{ flex: 1, backgroundColor: "#0B1220" }}>
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         className="flex-1"
@@ -565,7 +565,7 @@ export default function Groups() {
               renderItem={renderGroupItem}
               keyExtractor={(item) => item.id}
               showsVerticalScrollIndicator={false}
-              contentContainerStyle={{ paddingBottom: 100 }}
+              contentContainerStyle={{ paddingBottom: 110 }}
               refreshControl={
                 <RefreshControl
                   refreshing={isLoading || isBalancesLoading}

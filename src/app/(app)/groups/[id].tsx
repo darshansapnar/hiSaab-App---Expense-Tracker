@@ -72,6 +72,7 @@ export default function GroupDetail() {
     "overview" | "expenses" | "balances" | "members" | "activity" | "analytics" | "settlements"
   >((tab as any) || "overview");
   const [simplifyDebtsEnabled, setSimplifyDebtsEnabled] = useState(true);
+  const [isDetailedDebtsCollapsed, setIsDetailedDebtsCollapsed] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
 
   // Settle Modal fields
@@ -575,8 +576,51 @@ export default function GroupDetail() {
 
   const simplifiedDebts = simplifyDebts(netBalances);
   const userOutstandingDebts = useMemo(() => {
-    return simplifiedDebts.filter((d) => d.from === user?.id || d.to === user?.id);
-  }, [simplifiedDebts, user?.id]);
+    const activeDebts = simplifyDebtsEnabled ? simplifiedDebts : rawDebts;
+    return activeDebts.filter((d) => d.from === user?.id || d.to === user?.id);
+  }, [simplifiedDebts, rawDebts, simplifyDebtsEnabled, user?.id]);
+
+  const yourSummary = useMemo(() => {
+    if (!user?.id)
+      return { payItems: [], receiveItems: [], totalToPay: 0, totalToReceive: 0, isSettled: true };
+
+    const activeDebts = simplifyDebtsEnabled ? simplifiedDebts : rawDebts;
+
+    const toPay = activeDebts.filter((d) => d.from === user.id && d.amount > 0.01);
+    const toReceive = activeDebts.filter((d) => d.to === user.id && d.amount > 0.01);
+
+    const payItems = toPay.map((d) => {
+      const profile = members?.find((m: any) => m.profile.id === d.to)?.profile;
+      return {
+        memberId: d.to,
+        name: profile?.username ? `@${profile.username}` : profile?.display_name || "Someone",
+        amount: d.amount,
+        raw: d,
+      };
+    });
+
+    const receiveItems = toReceive.map((d) => {
+      const profile = members?.find((m: any) => m.profile.id === d.from)?.profile;
+      return {
+        memberId: d.from,
+        name: profile?.username ? `@${profile.username}` : profile?.display_name || "Someone",
+        amount: d.amount,
+        raw: d,
+      };
+    });
+
+    const totalToPay = payItems.reduce((sum, item) => sum + item.amount, 0);
+    const totalToReceive = receiveItems.reduce((sum, item) => sum + item.amount, 0);
+
+    return {
+      payItems,
+      receiveItems,
+      totalToPay,
+      totalToReceive,
+      isSettled: payItems.length === 0 && receiveItems.length === 0,
+    };
+  }, [simplifiedDebts, rawDebts, simplifyDebtsEnabled, user?.id, members]);
+
   const avatar = getGroupAvatarStyles(group?.name || "G");
 
   if (isGroupLoading || isMembersLoading || isExpensesLoading || isBalancesLoading) {
@@ -584,15 +628,21 @@ export default function GroupDetail() {
       <SafeAreaView style={{ flex: 1, backgroundColor: "#0B1220" }}>
         {/* Top Navigation */}
         <View className="flex-row justify-between items-center px-6 pb-4 border-b-[0.5px] border-white/5">
-          <TouchableOpacity disabled className="p-1 rounded-full bg-[#151E2E] border-[0.5px] border-white/10 opacity-55">
+          <TouchableOpacity
+            disabled
+            className="p-1 rounded-full bg-[#151E2E] border-[0.5px] border-white/10 opacity-55"
+          >
             <ChevronLeft size={20} color={Colors.accentCyan} />
           </TouchableOpacity>
           <Skeleton width="40%" height={16} borderRadius={4} />
-          <TouchableOpacity disabled className="p-1 rounded-full bg-[#151E2E] border-[0.5px] border-white/10 opacity-55">
+          <TouchableOpacity
+            disabled
+            className="p-1 rounded-full bg-[#151E2E] border-[0.5px] border-white/10 opacity-55"
+          >
             <Settings size={20} color="#94A3B8" />
           </TouchableOpacity>
         </View>
- 
+
         <ScrollView contentContainerStyle={{ padding: 24 }} showsVerticalScrollIndicator={false}>
           {/* Banner Card Skeleton */}
           <View className="bg-[#151E2E]/60 border-[0.5px] border-white/5 rounded-2xl p-5 mb-6 flex-row justify-between items-center">
@@ -605,7 +655,7 @@ export default function GroupDetail() {
             </View>
             <Skeleton width={80} height={44} borderRadius={12} />
           </View>
- 
+
           {/* Tabs skeleton */}
           <View className="flex-row justify-between mb-6 h-8 w-full">
             <Skeleton width="18%" height="100%" borderRadius={8} />
@@ -614,7 +664,7 @@ export default function GroupDetail() {
             <Skeleton width="18%" height="100%" borderRadius={8} />
             <Skeleton width="18%" height="100%" borderRadius={8} />
           </View>
- 
+
           {/* List Items Skeletons */}
           <View className="space-y-4">
             <SkeletonExpenseItem />
@@ -647,9 +697,11 @@ export default function GroupDetail() {
       : activeTab === "expenses"
         ? expenses?.filter((e: any) => !e.is_settlement)
         : activeTab === "balances"
-          ? simplifyDebtsEnabled
-            ? simplifiedDebts
-            : rawDebts
+          ? isDetailedDebtsCollapsed
+            ? []
+            : simplifyDebtsEnabled
+              ? simplifiedDebts
+              : rawDebts
           : activeTab === "members"
             ? members
             : activeTab === "activity"
@@ -812,7 +864,10 @@ export default function GroupDetail() {
                     } else {
                       // If multiple debts exist, switch to balances tab and guide them
                       setActiveTab("balances");
-                      showToast("Please tap 'Settle' next to the balance you want to settle.", "info");
+                      showToast(
+                        "Please tap 'Settle' next to the balance you want to settle.",
+                        "info"
+                      );
                     }
                   }}
                   className="bg-[#14E5D4] rounded-2xl py-3.5 mb-6 items-center justify-center active:scale-95 shadow-md shadow-[#14E5D4]/20"
@@ -922,6 +977,135 @@ export default function GroupDetail() {
                 </Text>
               )}
 
+              {/* Your Summary Card (Balances Tab) */}
+              {activeTab === "balances" && (
+                <View style={{ gap: 12 }} className="mb-6">
+                  <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest">
+                    Your Summary
+                  </Text>
+
+                  {yourSummary.isSettled ? (
+                    <View className="bg-emerald-500/10 border-[0.5px] border-emerald-500/30 rounded-2xl p-5 shadow-lg">
+                      <View className="flex-row items-center">
+                        <Text className="text-xl mr-3">✅</Text>
+                        <View>
+                          <Text className="text-white text-sm font-black">You're all settled!</Text>
+                          <Text className="text-emerald-400/80 text-xs font-semibold mt-1">
+                            No pending payments or receivables.
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+                  ) : (
+                    <>
+                      {yourSummary.payItems.length > 0 && (
+                        <View
+                          className="bg-orange-500/10 border-[0.5px] border-orange-500/30 rounded-2xl p-5 shadow-lg"
+                          style={{ gap: 12 }}
+                        >
+                          <Text className="text-orange-400 text-xs font-bold uppercase tracking-wider">
+                            🔴 You Need to Pay
+                          </Text>
+                          <View style={{ gap: 8 }}>
+                            {yourSummary.payItems.map((item) => (
+                              <View
+                                key={item.memberId}
+                                className="flex-row items-center justify-between py-1"
+                              >
+                                <View className="flex-row items-center flex-1 mr-4">
+                                  <Text className="text-white text-xs mr-2">•</Text>
+                                  <Text
+                                    className="text-white text-sm font-bold flex-1"
+                                    numberOfLines={1}
+                                  >
+                                    {item.name}
+                                  </Text>
+                                </View>
+                                <View className="flex-row items-center" style={{ gap: 12 }}>
+                                  <Text className="text-orange-400 text-sm font-black">
+                                    ₹{item.amount.toFixed(0)}
+                                  </Text>
+                                  <TouchableOpacity
+                                    onPress={() => {
+                                      Theme.haptics.medium();
+                                      setSettlementFrom(item.raw.from);
+                                      setSettlementTo(item.raw.to);
+                                      setSettlementAmount(item.amount.toFixed(0));
+                                      setSettlementOutstanding(item.amount);
+                                      setSettlementNotes("");
+                                      setSettlementDate(new Date().toISOString().split("T")[0]);
+                                      setIsSettleModalOpen(true);
+                                    }}
+                                    className="bg-[#14E5D4] px-3 py-1.5 rounded-xl active:opacity-90 shadow-sm shadow-[#14E5D4]/20"
+                                  >
+                                    <Text className="text-[#0B1220] text-[10px] font-black uppercase tracking-wider">
+                                      Settle Up
+                                    </Text>
+                                  </TouchableOpacity>
+                                </View>
+                              </View>
+                            ))}
+                          </View>
+                          <View className="border-t border-white/10 pt-3 mt-1 flex-row justify-between items-center">
+                            <Text className="text-[#94A3B8] text-xs font-semibold">
+                              Total To Pay
+                            </Text>
+                            <Text className="text-orange-400 text-base font-black">
+                              ₹{yourSummary.totalToPay.toFixed(0)}
+                            </Text>
+                          </View>
+                        </View>
+                      )}
+
+                      {yourSummary.receiveItems.length > 0 && (
+                        <View
+                          className="bg-emerald-500/10 border-[0.5px] border-emerald-500/30 rounded-2xl p-5 shadow-lg"
+                          style={{ gap: 12 }}
+                        >
+                          <Text className="text-[#22C55E] text-xs font-bold uppercase tracking-wider">
+                            🟢 You Will Receive
+                          </Text>
+                          <View style={{ gap: 8 }}>
+                            {yourSummary.receiveItems.map((item) => (
+                              <View
+                                key={item.memberId}
+                                className="flex-row items-center justify-between py-1"
+                              >
+                                <View className="flex-row items-center flex-1 mr-4">
+                                  <Text className="text-white text-xs mr-2">•</Text>
+                                  <View className="flex-1">
+                                    <Text
+                                      className="text-white text-sm font-bold"
+                                      numberOfLines={1}
+                                    >
+                                      {item.name}
+                                    </Text>
+                                    <Text className="text-[#94A3B8] text-[10px] mt-0.5">
+                                      Waiting for payment
+                                    </Text>
+                                  </View>
+                                </View>
+                                <Text className="text-[#22C55E] text-sm font-black">
+                                  ₹{item.amount.toFixed(0)}
+                                </Text>
+                              </View>
+                            ))}
+                          </View>
+                          <View className="border-t border-white/10 pt-3 mt-1 flex-row justify-between items-center">
+                            <Text className="text-[#94A3B8] text-xs font-semibold">
+                              Total To Receive
+                            </Text>
+                            <Text className="text-[#22C55E] text-base font-black">
+                              ₹{yourSummary.totalToReceive.toFixed(0)}
+                            </Text>
+                          </View>
+                        </View>
+                      )}
+                    </>
+                  )}
+                </View>
+              )}
+
               {/* Inline Net Balances Grid shown in Balances Tab */}
               {activeTab === "balances" && (
                 <View className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-5 mb-6 shadow-lg">
@@ -976,21 +1160,33 @@ export default function GroupDetail() {
                   <Text className="text-[#94A3B8] text-xs font-bold uppercase tracking-widest">
                     Suggested Payments
                   </Text>
-                  <TouchableOpacity
-                    onPress={() => {
-                      Theme.haptics.light();
-                      setSimplifyDebtsEnabled(!simplifyDebtsEnabled);
-                    }}
-                    className="bg-[#151E2E] border-[0.5px] border-white/5 px-2.5 py-1 rounded-lg"
-                  >
-                    <Text className="text-[10px] text-accentCyan font-bold">
-                      {simplifyDebtsEnabled ? "Debts Simplified" : "Raw Debts"}
-                    </Text>
-                  </TouchableOpacity>
+                  <View className="flex-row items-center" style={{ gap: 8 }}>
+                    <TouchableOpacity
+                      onPress={() => {
+                        Theme.haptics.light();
+                        setSimplifyDebtsEnabled(!simplifyDebtsEnabled);
+                      }}
+                      className="bg-[#151E2E] border-[0.5px] border-white/5 px-2.5 py-1.5 rounded-lg"
+                    >
+                      <Text className="text-[10px] text-accentCyan font-bold">
+                        {simplifyDebtsEnabled ? "Debts Simplified" : "Raw Debts"}
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={() => {
+                        Theme.haptics.light();
+                        setIsDetailedDebtsCollapsed(!isDetailedDebtsCollapsed);
+                      }}
+                      className="bg-[#151E2E] border-[0.5px] border-white/5 px-2.5 py-1.5 rounded-lg"
+                    >
+                      <Text className="text-[10px] text-accentCyan font-bold">
+                        {isDetailedDebtsCollapsed ? "Expand" : "Collapse"}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               )}
-
-
 
               {/* Analytics Tab layout */}
               {activeTab === "analytics" && analyticsData && (

@@ -180,9 +180,7 @@ export default function Profile() {
       if (recentExpenses && recentExpenses.length > 0) {
         const uniqueDates = [
           ...new Set(
-            recentExpenses.map((e: any) =>
-              new Date(e.created_at).toISOString().split("T")[0]
-            )
+            recentExpenses.map((e: any) => new Date(e.created_at).toISOString().split("T")[0])
           ),
         ].sort((a, b) => (b > a ? 1 : -1));
 
@@ -194,9 +192,7 @@ export default function Profile() {
           for (let i = 1; i < uniqueDates.length; i++) {
             const prevDate = new Date(uniqueDates[i - 1]);
             const currDate = new Date(uniqueDates[i]);
-            const diffDays = Math.round(
-              (prevDate.getTime() - currDate.getTime()) / 86400000
-            );
+            const diffDays = Math.round((prevDate.getTime() - currDate.getTime()) / 86400000);
             if (diffDays === 1) {
               streak++;
             } else {
@@ -275,7 +271,7 @@ export default function Profile() {
 
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
+        mediaTypes: ["images"],
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.6,
@@ -435,9 +431,12 @@ export default function Profile() {
   ];
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: Colors.background }}>
+    <SafeAreaView
+      edges={["top", "left", "right"]}
+      style={{ flex: 1, backgroundColor: Colors.background }}
+    >
       <ScrollView
-        contentContainerStyle={{ paddingBottom: 40 }}
+        contentContainerStyle={{ paddingBottom: 110 }}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
@@ -531,7 +530,9 @@ export default function Profile() {
               className="text-white text-xl font-black tracking-tight text-center"
               numberOfLines={1}
             >
-              {profile?.username ? `@${profile.username}` : profile?.display_name || "Set Your Name"}
+              {profile?.username
+                ? `@${profile.username}`
+                : profile?.display_name || "Set Your Name"}
             </Text>
             <Text className="text-[#94A3B8] text-xs font-medium mt-1 text-center">
               {user?.email}
@@ -805,14 +806,16 @@ export default function Profile() {
                 borderColor: errors.username
                   ? "#EF4444"
                   : isUsernameAvailable === true
-                  ? Colors.accentCyan
-                  : "rgba(255,255,255,0.1)",
+                    ? Colors.accentCyan
+                    : "rgba(255,255,255,0.1)",
                 borderRadius: 14,
                 paddingHorizontal: 16,
                 paddingVertical: 4,
               }}
             >
-              <Text style={{ color: "#94A3B8", fontSize: 16, fontWeight: "700", marginRight: 2 }}>@</Text>
+              <Text style={{ color: "#94A3B8", fontSize: 16, fontWeight: "700", marginRight: 2 }}>
+                @
+              </Text>
               <Controller
                 control={control}
                 name="username"
@@ -853,7 +856,12 @@ export default function Profile() {
             ) : usernameMsg ? (
               <Text
                 style={{
-                  color: isUsernameAvailable === true ? Colors.accentGreen : isUsernameAvailable === false ? "#EF4444" : "#94A3B8",
+                  color:
+                    isUsernameAvailable === true
+                      ? Colors.accentGreen
+                      : isUsernameAvailable === false
+                        ? "#EF4444"
+                        : "#94A3B8",
                   fontSize: 11,
                   marginTop: 4,
                   marginLeft: 4,
@@ -968,9 +976,7 @@ export default function Profile() {
                   alignItems: "center",
                 }}
               >
-                <Text style={{ color: "#94A3B8", fontSize: 14, fontWeight: "700" }}>
-                  Cancel
-                </Text>
+                <Text style={{ color: "#94A3B8", fontSize: 14, fontWeight: "700" }}>Cancel</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -986,9 +992,7 @@ export default function Profile() {
                   alignItems: "center",
                 }}
               >
-                <Text style={{ color: "#EF4444", fontSize: 14, fontWeight: "800" }}>
-                  Logout
-                </Text>
+                <Text style={{ color: "#EF4444", fontSize: 14, fontWeight: "800" }}>Logout</Text>
               </TouchableOpacity>
             </View>
           </View>
