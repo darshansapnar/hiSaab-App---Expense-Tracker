@@ -21,7 +21,7 @@ import { useToastStore } from "../../../store/toastStore";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { triggerWittyNotification } from "../../../services/wittyNotifications";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import Swipeable from "react-native-gesture-handler/Swipeable";
+import { Swipeable } from "react-native-gesture-handler";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
