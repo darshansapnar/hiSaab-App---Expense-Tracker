@@ -71,7 +71,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "prepare": "husky",
+    "prepare": "husky || true",
     "test": "jest"
   },
   "private": true
