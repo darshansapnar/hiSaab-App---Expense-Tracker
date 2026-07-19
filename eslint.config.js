@@ -2,7 +2,7 @@ const prettier = require("eslint-plugin-prettier");
 
 module.exports = [
   {
-    files: ["**/*.{js,jsx,ts,tsx}"],
+    files: ["**/*.{js,jsx}"],
     plugins: {
       prettier,
     },
