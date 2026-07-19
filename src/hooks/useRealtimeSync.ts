@@ -33,6 +33,7 @@ export function useRealtimeSync(groupId?: string) {
         async (payload) => {
           // 1. Instantly refresh active list queries across all caches
           queryClient.invalidateQueries({ queryKey: ["group-expenses"] });
+          queryClient.invalidateQueries({ queryKey: ["dashboard-group-expenses"] });
           queryClient.invalidateQueries({ queryKey: ["peer-balances"] });
           queryClient.invalidateQueries({ queryKey: ["dashboard-peer-balances"] });
           queryClient.invalidateQueries({ queryKey: ["global-peer-balances"] });
@@ -120,6 +121,7 @@ export function useRealtimeSync(groupId?: string) {
         { event: "*", schema: "public", table: "expense_splits" },
         async (payload) => {
           queryClient.invalidateQueries({ queryKey: ["group-expenses"] });
+          queryClient.invalidateQueries({ queryKey: ["dashboard-group-expenses"] });
           queryClient.invalidateQueries({ queryKey: ["peer-balances"] });
           queryClient.invalidateQueries({ queryKey: ["dashboard-peer-balances"] });
           queryClient.invalidateQueries({ queryKey: ["global-peer-balances"] });
@@ -147,6 +149,14 @@ export function useRealtimeSync(groupId?: string) {
         async (payload) => {
           queryClient.invalidateQueries({ queryKey: ["profile"] });
           queryClient.invalidateQueries({ queryKey: ["group-members"] });
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "tiffin_logs" },
+        async (payload) => {
+          queryClient.invalidateQueries({ queryKey: ["dashboard-tiffin-logs"] });
+          queryClient.invalidateQueries({ queryKey: ["tiffin-logs-month"] });
         }
       )
       .subscribe();
