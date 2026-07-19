@@ -24,7 +24,7 @@ export function useRealtimeSync(groupId?: string) {
   useEffect(() => {
     if (!user?.id) return;
 
-    // Listen to changes on 'expenses', 'group_members', and 'groups' tables
+    // Listen to changes on 'expenses', 'group_members', 'groups', 'peer_balances', and 'expense_splits' tables
     const groupSyncChannel = supabase
       .channel("realtime-group-sync")
       .on(
@@ -97,6 +97,23 @@ export function useRealtimeSync(groupId?: string) {
         async (payload) => {
           queryClient.invalidateQueries({ queryKey: ["group"] });
           queryClient.invalidateQueries({ queryKey: ["groups"] });
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "peer_balances" },
+        async (payload) => {
+          queryClient.invalidateQueries({ queryKey: ["peer-balances"] });
+          queryClient.invalidateQueries({ queryKey: ["global-peer-balances"] });
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "expense_splits" },
+        async (payload) => {
+          queryClient.invalidateQueries({ queryKey: ["group-expenses"] });
+          queryClient.invalidateQueries({ queryKey: ["peer-balances"] });
+          queryClient.invalidateQueries({ queryKey: ["global-peer-balances"] });
         }
       )
       .subscribe();

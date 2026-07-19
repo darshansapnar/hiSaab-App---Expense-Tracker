@@ -573,6 +573,9 @@ export default function GroupDetail() {
   };
 
   const simplifiedDebts = simplifyDebts(netBalances);
+  const userOutstandingDebts = useMemo(() => {
+    return simplifiedDebts.filter((d) => d.from === user?.id || d.to === user?.id);
+  }, [simplifiedDebts, user?.id]);
   const avatar = getGroupAvatarStyles(group?.name || "G");
 
   if (isGroupLoading || isMembersLoading || isExpensesLoading || isBalancesLoading) {
@@ -750,6 +753,32 @@ export default function GroupDetail() {
                   </View>
                 </View>
               </View>
+
+              {/* Always-visible Settle Up button right below category banner */}
+              {userOutstandingDebts.length > 0 && (
+                <TouchableOpacity
+                  onPress={() => {
+                    Theme.haptics.medium();
+                    if (userOutstandingDebts.length === 1) {
+                      const debt = userOutstandingDebts[0];
+                      setSettlementFrom(debt.from);
+                      setSettlementTo(debt.to);
+                      setSettlementAmount(debt.amount.toFixed(0));
+                      setSettlementOutstanding(debt.amount);
+                      setSettlementNotes("");
+                      setSettlementDate(new Date().toISOString().split("T")[0]);
+                      setIsSettleModalOpen(true);
+                    } else {
+                      // If multiple debts exist, switch to balances tab and guide them
+                      setActiveTab("balances");
+                      showToast("Please tap 'Settle' next to the balance you want to settle.", "info");
+                    }
+                  }}
+                  className="bg-[#14E5D4] rounded-2xl py-3.5 mb-6 items-center justify-center active:scale-95 shadow-md shadow-[#14E5D4]/20"
+                >
+                  <Text className="text-[#0B1220] font-black text-sm">🤝 Settle Up</Text>
+                </TouchableOpacity>
+              )}
 
               {/* Quick Stats Header widget */}
               {activeTab === "overview" &&
