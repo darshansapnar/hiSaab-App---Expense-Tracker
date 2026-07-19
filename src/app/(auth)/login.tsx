@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, Image } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, Image, Alert } from "react-native";
 import { useRouter, Link } from "expo-router";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -70,6 +70,7 @@ export default function Login() {
     try {
       const redirectUrl = Linking.createURL("google-auth");
       console.log("[Google Auth] Generated Redirect URL:", redirectUrl);
+      Alert.alert("Debug Redirect URL", redirectUrl);
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
