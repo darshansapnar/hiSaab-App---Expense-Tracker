@@ -4,6 +4,8 @@ import { Home, User, Users, BarChart2 } from "lucide-react-native";
 import { Colors } from "../../../constants/Colors";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { Theme } from "../../../constants/Theme";
+
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
   const tabHeight = 60 + insets.bottom;
@@ -13,6 +15,11 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
+        listeners: {
+          tabPress: () => {
+            Theme.haptics.selection();
+          },
+        },
         tabBarStyle: {
           backgroundColor: Colors.background, // Matches the deep dark blue/navy screen background color
           borderTopWidth: 0.5,

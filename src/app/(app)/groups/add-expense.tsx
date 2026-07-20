@@ -16,7 +16,18 @@ import { useToastStore } from "../../../store/toastStore";
 import { Theme } from "../../../constants/Theme";
 import { Colors } from "../../../constants/Colors";
 import { distributeShares, safeAdd, roundToTwoDecimals } from "../../../utils/math";
-import { ChevronLeft, Info, Percent, DollarSign, Scale, Users, Save, Calendar, FileText, Image } from "lucide-react-native";
+import {
+  ChevronLeft,
+  Info,
+  Percent,
+  DollarSign,
+  Scale,
+  Users,
+  Save,
+  Calendar,
+  FileText,
+  Image,
+} from "lucide-react-native";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -190,7 +201,8 @@ export default function AddExpense() {
       const expenseDateObj = new Date(data.expenseDate);
       const isoDate = expenseDateObj.toISOString();
 
-      const categoryName = categories?.find((c: any) => c.id === data.categoryId)?.name || "Expense";
+      const categoryName =
+        categories?.find((c: any) => c.id === data.categoryId)?.name || "Expense";
       const descVal = data.description?.trim() || categoryName;
 
       if (isMultiplePayers) {
@@ -204,7 +216,10 @@ export default function AddExpense() {
 
         const totalPaymentsSum = activePayments.reduce((sum, p) => sum + p.amount, 0);
         if (Math.round(totalPaymentsSum * 100) !== Math.round(expenseAmount * 100)) {
-          showToast(`Sum of payments (₹${totalPaymentsSum.toFixed(2)}) must equal total amount (₹${expenseAmount.toFixed(2)})`, "error");
+          showToast(
+            `Sum of payments (₹${totalPaymentsSum.toFixed(2)}) must equal total amount (₹${expenseAmount.toFixed(2)})`,
+            "error"
+          );
           setIsSaving(false);
           return;
         }
@@ -216,7 +231,9 @@ export default function AddExpense() {
         for (let i = 0; i < activePayments.length; i++) {
           const activePayer = activePayments[i];
           const payerProfile = members?.find((m: any) => m.profile.id === activePayer.id)?.profile;
-          const payerName = payerProfile?.username ? `@${payerProfile.username}` : payerProfile?.display_name || "Someone";
+          const payerName = payerProfile?.username
+            ? `@${payerProfile.username}`
+            : payerProfile?.display_name || "Someone";
 
           const subExpenseAmount = activePayer.amount;
           const subDescription = `${descVal} (${payerName}'s part)`;
@@ -247,7 +264,9 @@ export default function AddExpense() {
             share_ratio: computedSplits[index].shareRatio,
           }));
 
-          const { error: splitsError } = await supabase.from("expense_splits").insert(splitsPayload);
+          const { error: splitsError } = await supabase
+            .from("expense_splits")
+            .insert(splitsPayload);
           if (splitsError) throw splitsError;
         }
 
@@ -318,7 +337,9 @@ export default function AddExpense() {
             share_ratio: split.shareRatio,
           }));
 
-          const { error: splitsError } = await supabase.from("expense_splits").insert(splitsPayload);
+          const { error: splitsError } = await supabase
+            .from("expense_splits")
+            .insert(splitsPayload);
           if (splitsError) throw splitsError;
 
           triggerWittyNotification("expense_added", "Group Expense Added");
@@ -327,6 +348,7 @@ export default function AddExpense() {
 
       Theme.haptics.success();
       queryClient.invalidateQueries({ queryKey: ["group-expenses", groupId] });
+      queryClient.invalidateQueries({ queryKey: ["group-expenses"] });
       queryClient.invalidateQueries({ queryKey: ["peer-balances", groupId] });
       queryClient.invalidateQueries({ queryKey: ["global-peer-balances", user?.id] });
       queryClient.invalidateQueries({ queryKey: ["groups", user?.id] });
@@ -516,13 +538,11 @@ export default function AddExpense() {
                   <TouchableOpacity
                     key={cat.id}
                     onPress={() => {
-                      Theme.haptics.light();
+                      Theme.haptics.selection();
                       setValue("categoryId", cat.id);
                     }}
                     className={`px-4 py-2 rounded-xl border-[0.5px] ${
-                      isSelected
-                        ? "bg-accentCyan/10 border-accentCyan"
-                        : "bg-surface border-border"
+                      isSelected ? "bg-accentCyan/10 border-accentCyan" : "bg-surface border-border"
                     }`}
                   >
                     <Text
@@ -554,10 +574,14 @@ export default function AddExpense() {
                     setIsMultiplePayers(!isMultiplePayers);
                   }}
                   className={`px-2.5 py-1 rounded-lg border ${
-                    isMultiplePayers ? "bg-[#14E5D4]/10 border-[#14E5D4]" : "bg-surface border-border"
+                    isMultiplePayers
+                      ? "bg-[#14E5D4]/10 border-[#14E5D4]"
+                      : "bg-surface border-border"
                   }`}
                 >
-                  <Text className={`text-[10px] font-bold ${isMultiplePayers ? "text-[#14E5D4]" : "text-accentGray"}`}>
+                  <Text
+                    className={`text-[10px] font-bold ${isMultiplePayers ? "text-[#14E5D4]" : "text-accentGray"}`}
+                  >
                     {isMultiplePayers ? "Multiple Payers" : "Single Payer"}
                   </Text>
                 </TouchableOpacity>
@@ -598,7 +622,7 @@ export default function AddExpense() {
                     <TouchableOpacity
                       key={m.profile.id}
                       onPress={() => {
-                        Theme.haptics.light();
+                        Theme.haptics.selection();
                         setValue("paidBy", m.profile.id);
                       }}
                       className={`px-3 py-2 rounded-xl border-[0.5px] ${
@@ -757,7 +781,10 @@ export default function AddExpense() {
                   splitMode === "percent" ? "bg-surfaceLight" : ""
                 }`}
               >
-                <Percent size={14} color={splitMode === "percent" ? Colors.accentCyan : "#A3A3A3"} />
+                <Percent
+                  size={14}
+                  color={splitMode === "percent" ? Colors.accentCyan : "#A3A3A3"}
+                />
                 <Text
                   className={`text-xs font-bold ml-1 ${
                     splitMode === "percent" ? "text-accentCyan" : "text-accentGray"
@@ -776,7 +803,10 @@ export default function AddExpense() {
                   splitMode === "exact" ? "bg-surfaceLight" : ""
                 }`}
               >
-                <DollarSign size={14} color={splitMode === "exact" ? Colors.accentCyan : "#A3A3A3"} />
+                <DollarSign
+                  size={14}
+                  color={splitMode === "exact" ? Colors.accentCyan : "#A3A3A3"}
+                />
                 <Text
                   className={`text-xs font-bold ml-1 ${
                     splitMode === "exact" ? "text-accentCyan" : "text-accentGray"
@@ -795,9 +825,13 @@ export default function AddExpense() {
                 </Text>
                 <View className="mt-3 space-y-2">
                   {members?.map((m: any) => {
-                    const eqShare = totalAmount > 0 ? roundToTwoDecimals(totalAmount / members.length) : 0;
+                    const eqShare =
+                      totalAmount > 0 ? roundToTwoDecimals(totalAmount / members.length) : 0;
                     return (
-                      <View key={m.profile.id} className="flex-row justify-between py-2 border-b-[0.5px] border-neutral-900">
+                      <View
+                        key={m.profile.id}
+                        className="flex-row justify-between py-2 border-b-[0.5px] border-neutral-900"
+                      >
                         <Text className="text-white text-sm">
                           {m.profile.username ? `@${m.profile.username}` : m.profile.display_name}
                         </Text>
@@ -812,7 +846,8 @@ export default function AddExpense() {
             {splitMode === "shares" && (
               <View className="bg-surface border-[0.5px] border-border rounded-2xl p-4">
                 <Text className="text-accentGray text-[10px] leading-relaxed mb-4">
-                  Enter integer weight ratios (e.g. if A has share 2, B has 1, B pays half of A's share).
+                  Enter integer weight ratios (e.g. if A has share 2, B has 1, B pays half of A's
+                  share).
                 </Text>
                 {members?.map((m: any) => (
                   <View key={m.profile.id} className="flex-row items-center justify-between mb-3">

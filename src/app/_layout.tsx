@@ -14,6 +14,7 @@ import {
   Inter_900Black,
 } from "@expo-google-fonts/inter";
 import ToastContainer from "../components/ui/Toast";
+import { NetworkBanner } from "../components/ui/NetworkBanner";
 import { useThemeStore } from "../store/themeStore";
 import { Colors } from "../constants/Colors";
 import { useAuth } from "../hooks/useAuth";
@@ -57,6 +58,7 @@ export default function RootLayout() {
             }}
           />
           <ToastContainer />
+          <NetworkBanner />
         </SafeAreaProvider>
       </QueryClientProvider>
     </GestureHandlerRootView>

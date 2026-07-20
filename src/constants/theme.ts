@@ -20,6 +20,13 @@ export const Theme = {
     },
   },
   haptics: {
+    selection: () => {
+      try {
+        Haptics.selectionAsync();
+      } catch (e) {
+        // Fallback for non-supported platforms
+      }
+    },
     light: () => {
       try {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);

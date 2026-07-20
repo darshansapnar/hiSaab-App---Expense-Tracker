@@ -23,6 +23,10 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { triggerWittyNotification } from "../../../services/wittyNotifications";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Swipeable } from "react-native-gesture-handler";
+import { UserAvatar } from "../../../components/ui/UserAvatar";
+import { AnimatedCounter } from "../../../components/ui/AnimatedCounter";
+import { StaggeredCard } from "../../../components/ui/StaggeredCard";
+import { AnimatedButton } from "../../../components/ui/AnimatedButton";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -200,6 +204,9 @@ export default function Dashboard() {
       queryClient.invalidateQueries({ queryKey: ["dashboard-groups-latest", user?.id] }),
       queryClient.invalidateQueries({ queryKey: ["dashboard-personal-expenses", user?.id] }),
       queryClient.invalidateQueries({ queryKey: ["dashboard-peer-balances", user?.id] }),
+      queryClient.invalidateQueries({ queryKey: ["personal-expenses"] }),
+      queryClient.invalidateQueries({ queryKey: ["group-expenses"] }),
+      queryClient.invalidateQueries({ queryKey: ["budget"] }),
     ]);
     setIsRefreshing(false);
   }, [queryClient, user?.id]);
@@ -277,6 +284,7 @@ export default function Dashboard() {
     onSuccess: () => {
       Theme.haptics.success();
       queryClient.invalidateQueries({ queryKey: ["dashboard-personal-expenses", user?.id] });
+      queryClient.invalidateQueries({ queryKey: ["personal-expenses"] });
       triggerWittyNotification("expense_updated", "Expense Updated");
       setIsEditExpenseOpen(false);
       setEditingExpense(null);
@@ -287,20 +295,46 @@ export default function Dashboard() {
     },
   });
 
-  // Mutation to delete an expense
+  // Mutation to delete an expense with instant optimistic UI removal
   const deleteExpenseMutation = useMutation({
     mutationFn: async (expenseId: string) => {
       const { error } = await supabase.from("personal_expenses").delete().eq("id", expenseId);
       if (error) throw error;
     },
-    onSuccess: () => {
-      Theme.haptics.success();
-      queryClient.invalidateQueries({ queryKey: ["dashboard-personal-expenses", user?.id] });
-      triggerWittyNotification("expense_deleted", "Expense Deleted");
+    onMutate: async (expenseId: string) => {
+      Theme.haptics.medium();
+      await queryClient.cancelQueries({ queryKey: ["dashboard-personal-expenses"] });
+      await queryClient.cancelQueries({ queryKey: ["personal-expenses"] });
+
+      const prevDashboard = queryClient.getQueryData(["dashboard-personal-expenses", user?.id]);
+      const prevPersonal = queryClient.getQueryData(["personal-expenses", user?.id]);
+
+      queryClient.setQueryData(
+        ["dashboard-personal-expenses", user?.id],
+        (old: any[] | undefined) => (old ? old.filter((item: any) => item.id !== expenseId) : [])
+      );
+      queryClient.setQueryData(["personal-expenses", user?.id], (old: any[] | undefined) =>
+        old ? old.filter((item: any) => item.id !== expenseId) : []
+      );
+
+      return { prevDashboard, prevPersonal };
     },
-    onError: (error: any) => {
+    onError: (error: any, expenseId: string, context: any) => {
+      if (context?.prevDashboard) {
+        queryClient.setQueryData(["dashboard-personal-expenses", user?.id], context.prevDashboard);
+      }
+      if (context?.prevPersonal) {
+        queryClient.setQueryData(["personal-expenses", user?.id], context.prevPersonal);
+      }
       Theme.haptics.error();
       showToast(error.message || "Failed to delete expense", "error");
+    },
+    onSuccess: () => {
+      triggerWittyNotification("expense_deleted", "Expense Deleted");
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["dashboard-personal-expenses"] });
+      queryClient.invalidateQueries({ queryKey: ["personal-expenses"] });
     },
   });
 
@@ -370,9 +404,11 @@ export default function Dashboard() {
     }
 
     const now = new Date();
+    const curMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+
     const currentMonthExpenses = personalExpenses.filter((e) => {
-      const expDate = new Date(e.expense_date);
-      return expDate.getFullYear() === now.getFullYear() && expDate.getMonth() === now.getMonth();
+      if (!e.expense_date) return false;
+      return e.expense_date.substring(0, 7) === curMonthStr;
     });
 
     const totalSpent = currentMonthExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
@@ -676,31 +712,12 @@ export default function Dashboard() {
               }}
               className="active:scale-95"
             >
-              <View
-                style={{
-                  width: 38,
-                  height: 38,
-                  borderRadius: 19,
-                  backgroundColor: Colors.surface,
-                  borderWidth: 1.5,
-                  borderColor: "rgba(20, 229, 212, 0.25)",
-                  justifyContent: "center",
-                  alignItems: "center",
-                  overflow: "hidden",
-                }}
-              >
-                {profile?.avatar_url ? (
-                  profile.avatar_url.length <= 4 ? (
-                    <Text style={{ fontSize: 20 }}>{profile.avatar_url}</Text>
-                  ) : (
-                    <Image source={{ uri: profile.avatar_url }} style={{ width: 38, height: 38 }} />
-                  )
-                ) : (
-                  <Text style={{ fontSize: 13, fontWeight: "900", color: Colors.accentCyan }}>
-                    {getInitials()}
-                  </Text>
-                )}
-              </View>
+              <UserAvatar
+                name={profile?.display_name || profile?.username || user?.email}
+                avatarUrl={profile?.avatar_url}
+                userId={user?.id}
+                size={38}
+              />
             </TouchableOpacity>
           </View>
         </View>
@@ -736,9 +753,11 @@ export default function Dashboard() {
               {isExpensesLoading ? (
                 <Skeleton width="50%" height={16} borderRadius={4} style={{ marginTop: 6 }} />
               ) : (
-                <Text style={{ color: "#FFFFFF", fontSize: 18, fontWeight: "900", marginTop: 2 }}>
-                  ₹{stats.totalSpent.toFixed(0)}
-                </Text>
+                <AnimatedCounter
+                  value={stats.totalSpent}
+                  prefix="₹"
+                  style={{ color: "#FFFFFF", fontSize: 18, fontWeight: "900", marginTop: 2 }}
+                />
               )}
             </View>
 
@@ -770,9 +789,11 @@ export default function Dashboard() {
               {isPeerBalancesLoading ? (
                 <Skeleton width="50%" height={16} borderRadius={4} style={{ marginTop: 6 }} />
               ) : (
-                <Text style={{ color: "#FFFFFF", fontSize: 18, fontWeight: "900", marginTop: 2 }}>
-                  ₹{balanceSums.toPay.toFixed(0)}
-                </Text>
+                <AnimatedCounter
+                  value={balanceSums.toPay}
+                  prefix="₹"
+                  style={{ color: "#FFFFFF", fontSize: 18, fontWeight: "900", marginTop: 2 }}
+                />
               )}
             </View>
 
@@ -804,9 +825,11 @@ export default function Dashboard() {
               {isPeerBalancesLoading ? (
                 <Skeleton width="50%" height={16} borderRadius={4} style={{ marginTop: 6 }} />
               ) : (
-                <Text style={{ color: "#FFFFFF", fontSize: 18, fontWeight: "900", marginTop: 2 }}>
-                  ₹{balanceSums.toReceive.toFixed(0)}
-                </Text>
+                <AnimatedCounter
+                  value={balanceSums.toReceive}
+                  prefix="₹"
+                  style={{ color: "#FFFFFF", fontSize: 18, fontWeight: "900", marginTop: 2 }}
+                />
               )}
             </View>
 
@@ -1242,81 +1265,87 @@ export default function Dashboard() {
             </View>
           ) : latestExpenses.length > 0 ? (
             <View className="space-y-2">
-              {latestExpenses.map((item) => (
-                <View
-                  key={item.id}
-                  style={{
-                    backgroundColor: Colors.surface,
-                    borderRadius: 16,
-                    overflow: "hidden",
-                    borderWidth: 0.5,
-                    borderColor: "rgba(255,255,255,0.05)",
-                  }}
-                >
-                  <Swipeable
-                    renderRightActions={() => renderRightActions(item)}
-                    friction={2}
-                    rightThreshold={40}
+              {latestExpenses.map((item, index) => (
+                <StaggeredCard key={item.id} index={index}>
+                  <View
+                    style={{
+                      backgroundColor: Colors.surface,
+                      borderRadius: 16,
+                      overflow: "hidden",
+                      borderWidth: 0.5,
+                      borderColor: "rgba(255,255,255,0.05)",
+                    }}
                   >
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        padding: 14,
-                        backgroundColor: Colors.surface,
-                      }}
+                    <Swipeable
+                      renderRightActions={() => renderRightActions(item)}
+                      friction={2}
+                      rightThreshold={40}
                     >
-                      <View className="flex-row items-center flex-1 mr-2">
-                        <View
-                          style={{
-                            width: 36,
-                            height: 36,
-                            borderRadius: 12,
-                            backgroundColor: "rgba(255,255,255,0.03)",
-                            borderWidth: 0.5,
-                            borderColor: "rgba(255,255,255,0.05)",
-                            justifyContent: "center",
-                            alignItems: "center",
-                          }}
-                        >
-                          <Text style={{ fontSize: 16 }}>
-                            {getCategoryIcon(item.category?.name || "")}
-                          </Text>
-                        </View>
-                        <View className="ml-3 flex-1">
-                          <Text
-                            style={{ color: "#FFFFFF", fontSize: 13, fontWeight: "700" }}
-                            numberOfLines={1}
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          padding: 14,
+                          backgroundColor: Colors.surface,
+                        }}
+                      >
+                        <View className="flex-row items-center flex-1 mr-2">
+                          <View
+                            style={{
+                              width: 36,
+                              height: 36,
+                              borderRadius: 12,
+                              backgroundColor: "rgba(255,255,255,0.03)",
+                              borderWidth: 0.5,
+                              borderColor: "rgba(255,255,255,0.05)",
+                              justifyContent: "center",
+                              alignItems: "center",
+                            }}
                           >
-                            {item.description}
+                            <Text style={{ fontSize: 16 }}>
+                              {getCategoryIcon(item.category?.name || "")}
+                            </Text>
+                          </View>
+                          <View className="ml-3 flex-1">
+                            <Text
+                              style={{ color: "#FFFFFF", fontSize: 13, fontWeight: "700" }}
+                              numberOfLines={1}
+                            >
+                              {item.description}
+                            </Text>
+                            <Text
+                              style={{
+                                color: "#94A3B8",
+                                fontSize: 9,
+                                fontWeight: "600",
+                                marginTop: 1,
+                              }}
+                            >
+                              {item.category?.name || "Other"} • Personal
+                            </Text>
+                          </View>
+                        </View>
+
+                        <View className="items-end">
+                          <Text style={{ color: "#FFFFFF", fontSize: 13, fontWeight: "800" }}>
+                            ₹{Number(item.amount).toFixed(0)}
                           </Text>
                           <Text
                             style={{
                               color: "#94A3B8",
-                              fontSize: 9,
+                              fontSize: 8,
                               fontWeight: "600",
-                              marginTop: 1,
+                              marginTop: 2,
                             }}
                           >
-                            {item.category?.name || "Other"} • Personal
+                            {formatTime(item.expense_date)}
                           </Text>
                         </View>
                       </View>
-
-                      <View className="items-end">
-                        <Text style={{ color: "#FFFFFF", fontSize: 13, fontWeight: "800" }}>
-                          ₹{Number(item.amount).toFixed(0)}
-                        </Text>
-                        <Text
-                          style={{ color: "#94A3B8", fontSize: 8, fontWeight: "600", marginTop: 2 }}
-                        >
-                          {formatTime(item.expense_date)}
-                        </Text>
-                      </View>
-                    </View>
-                  </Swipeable>
-                </View>
+                    </Swipeable>
+                  </View>
+                </StaggeredCard>
               ))}
             </View>
           ) : (

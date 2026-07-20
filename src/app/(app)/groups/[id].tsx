@@ -22,6 +22,8 @@ import { Theme } from "../../../constants/Theme";
 import { Colors } from "../../../constants/Colors";
 import * as Clipboard from "expo-clipboard";
 import { triggerWittyNotification } from "../../../services/wittyNotifications";
+import { UserAvatar } from "../../../components/ui/UserAvatar";
+import { AnimatedButton } from "../../../components/ui/AnimatedButton";
 import {
   ChevronLeft,
   Copy,
@@ -146,6 +148,45 @@ export default function GroupDetail() {
     enabled: !!id,
   });
 
+  // Real-time synchronization channel subscription
+  useEffect(() => {
+    if (!id) return;
+
+    const channel = supabase
+      .channel(`group-details-realtime-${id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "expenses", filter: `group_id=eq.${id}` },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ["group-expenses", id] });
+          queryClient.invalidateQueries({ queryKey: ["peer-balances", id] });
+          queryClient.invalidateQueries({ queryKey: ["global-peer-balances"] });
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "group_members", filter: `group_id=eq.${id}` },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ["group-members", id] });
+          queryClient.invalidateQueries({ queryKey: ["group", id] });
+          queryClient.invalidateQueries({ queryKey: ["groups"] });
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "peer_balances", filter: `group_id=eq.${id}` },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ["peer-balances", id] });
+          queryClient.invalidateQueries({ queryKey: ["global-peer-balances"] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [id, queryClient]);
+
   // Mutation to record a settlement payment
   const settleMutation = useMutation({
     mutationFn: async (settlement: {
@@ -194,6 +235,7 @@ export default function GroupDetail() {
     onSuccess: () => {
       Theme.haptics.success();
       queryClient.invalidateQueries({ queryKey: ["group-expenses", id] });
+      queryClient.invalidateQueries({ queryKey: ["group-expenses"] });
       queryClient.invalidateQueries({ queryKey: ["peer-balances", id] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-peer-balances"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-personal-expenses"] });
@@ -239,6 +281,7 @@ export default function GroupDetail() {
     onSuccess: () => {
       Theme.haptics.success();
       queryClient.invalidateQueries({ queryKey: ["group-expenses", id] });
+      queryClient.invalidateQueries({ queryKey: ["group-expenses"] });
       queryClient.invalidateQueries({ queryKey: ["peer-balances", id] });
       queryClient.invalidateQueries({ queryKey: ["global-peer-balances", user?.id] });
       queryClient.invalidateQueries({ queryKey: ["groups", user?.id] });
@@ -259,6 +302,7 @@ export default function GroupDetail() {
     onSuccess: () => {
       Theme.haptics.success();
       queryClient.invalidateQueries({ queryKey: ["group-expenses", id] });
+      queryClient.invalidateQueries({ queryKey: ["group-expenses"] });
       queryClient.invalidateQueries({ queryKey: ["peer-balances", id] });
       queryClient.invalidateQueries({ queryKey: ["global-peer-balances", user?.id] });
       queryClient.invalidateQueries({ queryKey: ["groups", user?.id] });
@@ -849,7 +893,7 @@ export default function GroupDetail() {
 
               {/* Always-visible Settle Up button right below category banner */}
               {userOutstandingDebts.length > 0 && (
-                <TouchableOpacity
+                <AnimatedButton
                   onPress={() => {
                     Theme.haptics.medium();
                     if (userOutstandingDebts.length === 1) {
@@ -870,10 +914,10 @@ export default function GroupDetail() {
                       );
                     }
                   }}
-                  className="bg-[#14E5D4] rounded-2xl py-3.5 mb-6 items-center justify-center active:scale-95 shadow-md shadow-[#14E5D4]/20"
+                  className="bg-[#14E5D4] rounded-2xl py-3.5 mb-6 items-center justify-center shadow-md shadow-[#14E5D4]/20"
                 >
                   <Text className="text-[#0B1220] font-black text-sm">🤝 Settle Up</Text>
-                </TouchableOpacity>
+                </AnimatedButton>
               )}
 
               {/* Quick Stats Header widget */}
@@ -1462,13 +1506,13 @@ export default function GroupDetail() {
               return (
                 <View className="bg-[#151E2E] border-[0.5px] border-white/5 p-4 rounded-2xl mb-3 shadow-md">
                   <View className="flex-row items-center mb-3">
-                    <View
-                      className={`w-10 h-10 border-[0.5px] justify-center items-center rounded-full mr-3 ${mAvatar.bgClass}`}
-                    >
-                      <Text className={`text-sm font-bold ${mAvatar.textClass}`}>
-                        {mAvatar.letter}
-                      </Text>
-                    </View>
+                    <UserAvatar
+                      name={item.profile.display_name || item.profile.username}
+                      avatarUrl={item.profile.avatar_url}
+                      userId={item.profile.id}
+                      size="md"
+                      className="mr-3"
+                    />
                     <View className="flex-1">
                       <Text className="text-white text-sm font-bold">
                         {item.profile.username

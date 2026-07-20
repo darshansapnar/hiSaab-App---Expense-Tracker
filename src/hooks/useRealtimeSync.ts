@@ -3,7 +3,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "../services/supabase";
 import { useAuthStore } from "../store/authStore";
 import { useToastStore } from "../store/toastStore";
-import { triggerLocalNotification, registerForPushNotificationsAsync } from "../services/notifications";
+import {
+  triggerLocalNotification,
+  registerForPushNotificationsAsync,
+} from "../services/notifications";
 
 /**
  * Registers active listeners for database updates, triggering real-time UI updates
@@ -74,7 +77,10 @@ export function useRealtimeSync(groupId?: string) {
                 }
               } else {
                 // New Expense Reminder
-                showToast(`${payerName} added "${newRow.description}" of ₹${newRow.amount}`, "info");
+                showToast(
+                  `${payerName} added "${newRow.description}" of ₹${newRow.amount}`,
+                  "info"
+                );
                 triggerLocalNotification(
                   "New Shared Expense",
                   `${payerName} added "${newRow.description}" of ₹${newRow.amount}.`,
@@ -157,6 +163,7 @@ export function useRealtimeSync(groupId?: string) {
         async (payload) => {
           queryClient.invalidateQueries({ queryKey: ["dashboard-tiffin-logs"] });
           queryClient.invalidateQueries({ queryKey: ["tiffin-logs-month"] });
+          queryClient.invalidateQueries({ queryKey: ["all-tiffin-logs"] });
         }
       )
       .subscribe();

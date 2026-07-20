@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -134,6 +134,26 @@ export default function Groups() {
     },
     enabled: !!user?.id,
   });
+
+  // Real-time synchronization channel subscription for global groups & member lists
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const channel = supabase
+      .channel(`user-groups-realtime-${user.id}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "group_members" }, () => {
+        queryClient.invalidateQueries({ queryKey: ["groups", user?.id] });
+        queryClient.invalidateQueries({ queryKey: ["global-peer-balances", user?.id] });
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "groups" }, () => {
+        queryClient.invalidateQueries({ queryKey: ["groups", user?.id] });
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id, queryClient]);
 
   const {
     control,

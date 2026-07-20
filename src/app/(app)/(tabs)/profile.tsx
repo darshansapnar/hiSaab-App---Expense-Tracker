@@ -23,6 +23,7 @@ import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import * as ImagePicker from "expo-image-picker";
+import { UserAvatar } from "../../../components/ui/UserAvatar";
 import {
   Camera,
   LogOut,
@@ -462,42 +463,29 @@ export default function Profile() {
           <View className="items-center px-6">
             {/* Avatar */}
             <View className="relative mb-4">
-              <View
-                style={{
-                  width: 100,
-                  height: 100,
-                  borderRadius: 50,
-                  backgroundColor: Colors.surface,
-                  borderWidth: 2,
-                  borderColor: "rgba(20, 229, 212, 0.3)",
-                  justifyContent: "center",
-                  alignItems: "center",
-                  overflow: "hidden",
-                }}
-              >
-                {isUploading ? (
+              {isUploading ? (
+                <View
+                  style={{
+                    width: 100,
+                    height: 100,
+                    borderRadius: 50,
+                    backgroundColor: Colors.surface,
+                    borderWidth: 2,
+                    borderColor: "rgba(20, 229, 212, 0.3)",
+                    justifyContent: "center",
+                    alignItems: "center",
+                  }}
+                >
                   <ActivityIndicator size="large" color={Colors.accentCyan} />
-                ) : profile?.avatar_url ? (
-                  isEmojiAvatar ? (
-                    <Text style={{ fontSize: 42 }}>{profile.avatar_url}</Text>
-                  ) : (
-                    <Image
-                      source={{ uri: profile.avatar_url }}
-                      style={{ width: 100, height: 100 }}
-                    />
-                  )
-                ) : (
-                  <Text
-                    style={{
-                      fontSize: 32,
-                      fontWeight: "900",
-                      color: Colors.accentCyan,
-                    }}
-                  >
-                    {getInitials()}
-                  </Text>
-                )}
-              </View>
+                </View>
+              ) : (
+                <UserAvatar
+                  name={profile?.display_name || user?.email}
+                  avatarUrl={profile?.avatar_url}
+                  userId={user?.id}
+                  size={100}
+                />
+              )}
 
               {/* Camera button */}
               <TouchableOpacity
