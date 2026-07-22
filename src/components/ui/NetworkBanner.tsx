@@ -11,7 +11,7 @@ export function NetworkBanner() {
 
   const [status, setStatus] = useState<"online" | "offline" | "back_online">("online");
   const wasOfflineRef = useRef(false);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Animated values for smooth slide and fade
   const translateY = useRef(new Animated.Value(-80)).current;

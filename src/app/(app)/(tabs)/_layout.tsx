@@ -13,13 +13,13 @@ export default function TabLayout() {
 
   return (
     <Tabs
+      screenListeners={{
+        tabPress: () => {
+          Theme.haptics.selection();
+        },
+      }}
       screenOptions={{
         headerShown: false,
-        listeners: {
-          tabPress: () => {
-            Theme.haptics.selection();
-          },
-        },
         tabBarStyle: {
           backgroundColor: Colors.background, // Matches the deep dark blue/navy screen background color
           borderTopWidth: 0.5,

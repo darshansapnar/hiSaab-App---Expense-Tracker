@@ -18,7 +18,16 @@ import { useToastStore } from "../../store/toastStore";
 import { Theme } from "../../constants/Theme";
 import { Colors } from "../../constants/Colors";
 import { triggerWittyNotification } from "../../services/wittyNotifications";
-import { ChevronLeft, Coffee, Moon, Settings, Check, AlertCircle, X } from "lucide-react-native";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Coffee,
+  Moon,
+  Settings,
+  Check,
+  AlertCircle,
+  X,
+} from "lucide-react-native";
 
 export default function TiffinTracker() {
   const router = useRouter();
@@ -26,10 +35,46 @@ export default function TiffinTracker() {
   const user = useAuthStore((state) => state.user);
   const showToast = useToastStore((state) => state.showToast);
 
-  // Month navigation locked to current month
-  const currentYear = new Date().getFullYear();
-  const currentMonth = new Date().getMonth();
+  // Real-world current date reference
+  const todayDate = useMemo(() => new Date(), []);
+  const currentYear = todayDate.getFullYear();
+  const currentMonth = todayDate.getMonth();
+
+  // Active viewing month & year navigation state
+  const [viewYear, setViewYear] = useState<number>(currentYear);
+  const [viewMonth, setViewMonth] = useState<number>(currentMonth);
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+
+  const isCurrentMonth = viewYear === currentYear && viewMonth === currentMonth;
+
+  useEffect(() => {
+    if (viewYear === currentYear && viewMonth === currentMonth) {
+      setSelectedDate(new Date());
+    } else {
+      setSelectedDate(new Date(viewYear, viewMonth, 1));
+    }
+  }, [viewYear, viewMonth, currentYear, currentMonth]);
+
+  const handlePrevMonth = () => {
+    Theme.haptics.light();
+    if (viewMonth === 0) {
+      setViewMonth(11);
+      setViewYear((prev) => prev - 1);
+    } else {
+      setViewMonth((prev) => prev - 1);
+    }
+  };
+
+  const handleNextMonth = () => {
+    Theme.haptics.light();
+    if (isCurrentMonth) return;
+    if (viewMonth === 11) {
+      setViewMonth(0);
+      setViewYear((prev) => prev + 1);
+    } else {
+      setViewMonth((prev) => prev + 1);
+    }
+  };
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
@@ -208,11 +253,11 @@ export default function TiffinTracker() {
     },
   });
 
-  // Filter all logs to just the current month's logs
+  // Filter all logs to just the active view month's logs
   const monthlyLogs = useMemo(() => {
-    const curMonthStr = `${currentYear}-${String(currentMonth + 1).padStart(2, "0")}`;
-    return allLogs?.filter((l) => l.log_date.startsWith(curMonthStr)) || [];
-  }, [allLogs, currentYear, currentMonth]);
+    const monthStr = `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}`;
+    return allLogs?.filter((l) => l.log_date.startsWith(monthStr)) || [];
+  }, [allLogs, viewYear, viewMonth]);
 
   // Active status for the selected day
   const selectedLog = useMemo(() => {
@@ -290,8 +335,8 @@ export default function TiffinTracker() {
     const attendancePct = loggedDays > 0 ? (totalMeals / (loggedDays * 2)) * 100 : 0;
     const avgCostPerDay = loggedDays > 0 ? totalBill / loggedDays : 0;
 
-    const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-    const daysElapsed = new Date().getDate();
+    const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+    const daysElapsed = isCurrentMonth ? new Date().getDate() : daysInMonth;
     // Estimate Month-End bill using average meals/cost per day
     const avgCostPerCalendarDay = daysElapsed > 0 ? totalBill / daysElapsed : 0;
     const estimatedBill = totalMeals > 0 ? avgCostPerCalendarDay * daysInMonth : 0;
@@ -309,22 +354,22 @@ export default function TiffinTracker() {
       estimatedBill,
       daysInMonth,
     };
-  }, [monthlyLogs, profileBreakfast, profileDinner, currentYear, currentMonth]);
+  }, [monthlyLogs, profileBreakfast, profileDinner, viewYear, viewMonth, isCurrentMonth]);
 
   // MONTH CALENDAR GRID CALCULATOR
   const calendarGrid = useMemo(() => {
-    const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-    const firstDayIndex = new Date(currentYear, currentMonth, 1).getDay();
+    const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+    const firstDayIndex = new Date(viewYear, viewMonth, 1).getDay();
 
     const grid = [];
     for (let i = 0; i < firstDayIndex; i++) {
       grid.push(null);
     }
     for (let day = 1; day <= daysInMonth; day++) {
-      grid.push(new Date(currentYear, currentMonth, day));
+      grid.push(new Date(viewYear, viewMonth, day));
     }
     return grid;
-  }, [currentYear, currentMonth]);
+  }, [viewYear, viewMonth]);
 
   // Group logs to generate historical monthly reports
   const previousMonthsReports = useMemo(() => {
@@ -394,7 +439,7 @@ export default function TiffinTracker() {
       .sort((a, b) => b.ym.localeCompare(a.ym)); // newest first
   }, [allLogs, currentYear, currentMonth]);
 
-  const monthName = new Date(currentYear, currentMonth).toLocaleDateString("en-US", {
+  const monthName = new Date(viewYear, viewMonth).toLocaleDateString("en-US", {
     month: "long",
     year: "numeric",
   });
@@ -429,7 +474,9 @@ export default function TiffinTracker() {
   const isFuture = (date: Date) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    return date.getTime() > today.getTime();
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime() > today.getTime();
   };
 
   const formatRupees = (amount: number) => {
@@ -479,7 +526,7 @@ export default function TiffinTracker() {
       >
         <>
           {/* TODAY MEAL MARK REMINDER NOTIFICATION */}
-          {!todayLog && (
+          {!todayLog && isCurrentMonth && (
             <View className="bg-amber-500/10 border-[0.5px] border-amber-500/20 rounded-2xl p-4 mt-5 flex-row items-center">
               <AlertCircle size={20} color="#F59E0B" className="mr-2" />
               <View className="flex-1">
@@ -496,13 +543,13 @@ export default function TiffinTracker() {
           {/* Prominent Tiffin Summary Banner */}
           <View className="bg-[#151E2E] border-[0.5px] border-white/5 p-5 rounded-2xl mt-6 shadow-xl">
             <Text className="text-[#94A3B8] text-[10px] font-bold uppercase tracking-widest">
-              This Month Bill
+              {isCurrentMonth ? "This Month Bill" : `${monthName} Bill`}
             </Text>
             <Text className="text-[#14E5D4] text-3xl font-black mt-1.5">
               {formatRupees(stats.totalBill)}
             </Text>
 
-            {stats.totalMeals > 0 && (
+            {stats.totalMeals > 0 && isCurrentMonth && (
               <Text className="text-[#94A3B8] text-[10px] mt-1.5">
                 Estimated Month-End Bill:{" "}
                 <Text className="text-white font-bold">
@@ -540,125 +587,167 @@ export default function TiffinTracker() {
           </View>
 
           {/* ONE-TAP MEAL TOGGLE LOGGING */}
-          <View className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-5 mt-6 shadow-lg">
-            <View className="flex-row justify-between items-center border-b border-white/5 pb-3.5 mb-4">
-              <View>
-                <Text className="text-white font-bold text-sm">
-                  {selectedDate.toLocaleDateString("en-US", {
-                    month: "short",
-                    day: "numeric",
-                    year: "numeric",
-                  })}
-                </Text>
-                <Text className="text-[#94A3B8] text-[10px] mt-0.5">Tapping logs immediately</Text>
+          {(() => {
+            const isSelectedDateFuture = isFuture(selectedDate);
+            return (
+              <View className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-5 mt-6 shadow-lg">
+                <View className="flex-row justify-between items-center border-b border-white/5 pb-3.5 mb-4">
+                  <View>
+                    <Text className="text-white font-bold text-sm">
+                      {selectedDate.toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                      })}
+                    </Text>
+                    <Text className="text-[#94A3B8] text-[10px] mt-0.5">
+                      {isSelectedDateFuture
+                        ? "Future date (Read Only)"
+                        : "Tapping logs immediately"}
+                    </Text>
+                  </View>
+                  {isToday(selectedDate) && isCurrentMonth && (
+                    <View className="bg-[#14E5D4]/10 border-[0.5px] border-[#14E5D4]/20 px-2 py-0.5 rounded-full">
+                      <Text className="text-[#14E5D4] text-[8px] font-bold uppercase tracking-wider">
+                        Today
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                {/* Meals selection */}
+                <View style={{ gap: 12 }}>
+                  {/* Breakfast Toggle */}
+                  <TouchableOpacity
+                    disabled={isSelectedDateFuture || logTiffinMutation.isPending}
+                    onPress={() => {
+                      Theme.haptics.selection();
+                      logTiffinMutation.mutate({
+                        date: selectedDateStr,
+                        breakfast: !hasBreakfast,
+                        dinner: hasDinner,
+                      });
+                    }}
+                    className={`flex-row justify-between items-center p-3.5 rounded-xl border ${
+                      hasBreakfast ? "bg-white/5 border-white/10" : "border-white/5"
+                    } ${isSelectedDateFuture ? "opacity-40" : "opacity-100"}`}
+                  >
+                    <View className="flex-row items-center">
+                      <Coffee
+                        size={18}
+                        color={hasBreakfast ? "#14E5D4" : "#94A3B8"}
+                        className="mr-3"
+                      />
+                      <Text
+                        className={`text-xs font-semibold ${hasBreakfast ? "text-white" : "text-[#94A3B8]"}`}
+                      >
+                        Breakfast Menu (₹{profileBreakfast})
+                      </Text>
+                    </View>
+                    <View
+                      className={`w-5 h-5 rounded border-[1.5px] items-center justify-center ${
+                        hasBreakfast ? "bg-[#14E5D4] border-[#14E5D4]" : "border-[#94A3B8]/40"
+                      }`}
+                    >
+                      {hasBreakfast && <Check size={12} color="#0B1220" strokeWidth={3} />}
+                    </View>
+                  </TouchableOpacity>
+
+                  {/* Dinner Toggle */}
+                  <TouchableOpacity
+                    disabled={isSelectedDateFuture || logTiffinMutation.isPending}
+                    onPress={() => {
+                      Theme.haptics.selection();
+                      logTiffinMutation.mutate({
+                        date: selectedDateStr,
+                        breakfast: hasBreakfast,
+                        dinner: !hasDinner,
+                      });
+                    }}
+                    className={`flex-row justify-between items-center p-3.5 rounded-xl border ${
+                      hasDinner ? "bg-white/5 border-white/10" : "border-white/5"
+                    } ${isSelectedDateFuture ? "opacity-40" : "opacity-100"}`}
+                  >
+                    <View className="flex-row items-center">
+                      <Moon size={18} color={hasDinner ? "#14E5D4" : "#94A3B8"} className="mr-3" />
+                      <Text
+                        className={`text-xs font-semibold ${hasDinner ? "text-white" : "text-[#94A3B8]"}`}
+                      >
+                        Dinner Menu (₹{profileDinner})
+                      </Text>
+                    </View>
+                    <View
+                      className={`w-5 h-5 rounded border-[1.5px] items-center justify-center ${
+                        hasDinner ? "bg-[#14E5D4] border-[#14E5D4]" : "border-[#94A3B8]/40"
+                      }`}
+                    >
+                      {hasDinner && <Check size={12} color="#0B1220" strokeWidth={3} />}
+                    </View>
+                  </TouchableOpacity>
+                </View>
+
+                {/* QUICK ACTIONS FOR TODAY */}
+                <View className="flex-row flex-wrap gap-2.5 mt-5">
+                  <TouchableOpacity
+                    disabled={isSelectedDateFuture || logTiffinMutation.isPending}
+                    onPress={handleMarkBreakfast}
+                    className={`flex-1 min-w-[45%] bg-[#14E5D4]/10 border border-[#14E5D4]/20 py-2.5 rounded-xl items-center ${
+                      isSelectedDateFuture ? "opacity-40" : "active:opacity-85"
+                    }`}
+                  >
+                    <Text className="text-[#14E5D4] text-[10px] font-black">Mark Breakfast</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    disabled={isSelectedDateFuture || logTiffinMutation.isPending}
+                    onPress={handleMarkDinner}
+                    className={`flex-1 min-w-[45%] bg-[#14E5D4]/10 border border-[#14E5D4]/20 py-2.5 rounded-xl items-center ${
+                      isSelectedDateFuture ? "opacity-40" : "active:opacity-85"
+                    }`}
+                  >
+                    <Text className="text-[#14E5D4] text-[10px] font-black">Mark Dinner</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    disabled={isSelectedDateFuture || logTiffinMutation.isPending}
+                    onPress={handleMarkBoth}
+                    className={`flex-1 min-w-[45%] bg-[#14E5D4] py-2.5 rounded-xl items-center ${
+                      isSelectedDateFuture ? "opacity-40" : "active:opacity-90"
+                    }`}
+                  >
+                    <Text className="text-[#0B1220] text-[10px] font-black">Mark Both</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    disabled={isSelectedDateFuture || logTiffinMutation.isPending}
+                    onPress={handleClearToday}
+                    className={`flex-1 min-w-[45%] bg-white/5 border border-white/10 py-2.5 rounded-xl items-center ${
+                      isSelectedDateFuture ? "opacity-40" : "active:opacity-85"
+                    }`}
+                  >
+                    <Text className="text-[#94A3B8] text-[10px] font-bold">Clear Entries</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
-              {isToday(selectedDate) && (
-                <View className="bg-[#14E5D4]/10 border-[0.5px] border-[#14E5D4]/20 px-2 py-0.5 rounded-full">
-                  <Text className="text-[#14E5D4] text-[8px] font-bold uppercase tracking-wider">
-                    Today
-                  </Text>
-                </View>
-              )}
-            </View>
-
-            {/* Meals selection */}
-            <View style={{ gap: 12 }}>
-              {/* Breakfast Toggle */}
-              <TouchableOpacity
-                onPress={() => {
-                  Theme.haptics.selection();
-                  logTiffinMutation.mutate({
-                    date: selectedDateStr,
-                    breakfast: !hasBreakfast,
-                    dinner: hasDinner,
-                  });
-                }}
-                className={`flex-row justify-between items-center p-3.5 rounded-xl border ${
-                  hasBreakfast ? "bg-white/5 border-white/10" : "border-white/5"
-                }`}
-              >
-                <View className="flex-row items-center">
-                  <Coffee size={18} color={hasBreakfast ? "#14E5D4" : "#94A3B8"} className="mr-3" />
-                  <Text
-                    className={`text-xs font-semibold ${hasBreakfast ? "text-white" : "text-[#94A3B8]"}`}
-                  >
-                    Breakfast Menu (₹{profileBreakfast})
-                  </Text>
-                </View>
-                <View
-                  className={`w-5 h-5 rounded border-[1.5px] items-center justify-center ${
-                    hasBreakfast ? "bg-[#14E5D4] border-[#14E5D4]" : "border-[#94A3B8]/40"
-                  }`}
-                >
-                  {hasBreakfast && <Check size={12} color="#0B1220" strokeWidth={3} />}
-                </View>
-              </TouchableOpacity>
-
-              {/* Dinner Toggle */}
-              <TouchableOpacity
-                onPress={() => {
-                  Theme.haptics.selection();
-                  logTiffinMutation.mutate({
-                    date: selectedDateStr,
-                    breakfast: hasBreakfast,
-                    dinner: !hasDinner,
-                  });
-                }}
-                className={`flex-row justify-between items-center p-3.5 rounded-xl border ${
-                  hasDinner ? "bg-white/5 border-white/10" : "border-white/5"
-                }`}
-              >
-                <View className="flex-row items-center">
-                  <Moon size={18} color={hasDinner ? "#14E5D4" : "#94A3B8"} className="mr-3" />
-                  <Text
-                    className={`text-xs font-semibold ${hasDinner ? "text-white" : "text-[#94A3B8]"}`}
-                  >
-                    Dinner Menu (₹{profileDinner})
-                  </Text>
-                </View>
-                <View
-                  className={`w-5 h-5 rounded border-[1.5px] items-center justify-center ${
-                    hasDinner ? "bg-[#14E5D4] border-[#14E5D4]" : "border-[#94A3B8]/40"
-                  }`}
-                >
-                  {hasDinner && <Check size={12} color="#0B1220" strokeWidth={3} />}
-                </View>
-              </TouchableOpacity>
-            </View>
-
-            {/* QUICK ACTIONS FOR TODAY */}
-            <View className="flex-row flex-wrap gap-2.5 mt-5">
-              <TouchableOpacity
-                onPress={handleMarkBreakfast}
-                className="flex-1 min-w-[45%] bg-[#14E5D4]/10 border border-[#14E5D4]/20 py-2.5 rounded-xl items-center active:opacity-85"
-              >
-                <Text className="text-[#14E5D4] text-[10px] font-black">Mark Breakfast</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={handleMarkDinner}
-                className="flex-1 min-w-[45%] bg-[#14E5D4]/10 border border-[#14E5D4]/20 py-2.5 rounded-xl items-center active:opacity-85"
-              >
-                <Text className="text-[#14E5D4] text-[10px] font-black">Mark Dinner</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={handleMarkBoth}
-                className="flex-1 min-w-[45%] bg-[#14E5D4] py-2.5 rounded-xl items-center active:opacity-90"
-              >
-                <Text className="text-[#0B1220] text-[10px] font-black">Mark Both</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={handleClearToday}
-                className="flex-1 min-w-[45%] bg-white/5 border border-white/10 py-2.5 rounded-xl items-center active:opacity-85"
-              >
-                <Text className="text-[#94A3B8] text-[10px] font-bold">Clear Entries</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+            );
+          })()}
 
           {/* MONTHLY CALENDAR GRID MODULE */}
           <View className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-5 mt-6 shadow-lg">
-            <View className="flex-row justify-center items-center mb-5">
+            <View className="flex-row justify-between items-center mb-5">
+              <TouchableOpacity
+                onPress={handlePrevMonth}
+                className="p-1.5 rounded-full bg-white/5 border-[0.5px] border-white/10 active:opacity-80"
+              >
+                <ChevronLeft size={18} color="#14E5D4" />
+              </TouchableOpacity>
               <Text className="text-white text-sm font-black">{monthName}</Text>
+              <TouchableOpacity
+                onPress={handleNextMonth}
+                disabled={isCurrentMonth}
+                className={`p-1.5 rounded-full bg-white/5 border-[0.5px] border-white/10 ${
+                  isCurrentMonth ? "opacity-0" : "active:opacity-80"
+                }`}
+              >
+                <ChevronRight size={18} color="#14E5D4" />
+              </TouchableOpacity>
             </View>
 
             {/* Calendar week header */}
@@ -687,16 +776,18 @@ export default function TiffinTracker() {
                   <TouchableOpacity
                     key={day.toISOString()}
                     onPress={() => {
+                      if (isFut) return;
                       Theme.haptics.light();
                       setSelectedDate(day);
                     }}
+                    disabled={isFut}
                     className={`w-[14.28%] h-12 justify-center items-center rounded-xl border ${
                       isSel
                         ? "border-[#14E5D4] bg-[#14E5D4]/10"
                         : isTodayDay
                           ? "border-white/20 bg-white/5"
                           : "border-transparent"
-                    }`}
+                    } ${isFut ? "opacity-40" : "opacity-100"}`}
                   >
                     <Text
                       className={`text-xs font-bold ${
@@ -850,6 +941,9 @@ export default function TiffinTracker() {
                   key={report.ym}
                   onPress={() => {
                     Theme.haptics.light();
+                    setViewYear(report.year);
+                    setViewMonth(report.month);
+                    setSelectedDate(new Date(report.year, report.month, 1));
                     setSelectedReport(report);
                   }}
                   className="bg-[#151E2E] border-[0.5px] border-white/5 rounded-2xl p-4 flex-row justify-between items-center shadow-md active:opacity-85"
