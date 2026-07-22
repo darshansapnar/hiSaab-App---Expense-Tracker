@@ -8,7 +8,7 @@
 [![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL_%26_RLS-3ECF8E?style=for-the-badge&logo=supabase&logoColor=white)](https://supabase.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 
-**hiSaab** is a modern, high-performance, and offline-first mobile shared and personal finance management application. Built specifically for hostel students, flatmates, travel groups, couples, and individuals, hiSaab removes the friction of daily money management, shared expense splitting, meal subscriptions, and monthly budgeting.
+**hiSaab** is a modern, high-performance, cloud-synced mobile shared and personal finance management application. Built specifically for hostel students, flatmates, travel groups, couples, and individuals, hiSaab removes the friction of daily money management, shared expense splitting, meal subscriptions, and monthly budgeting.
 
 Unlike generic expense splitters, hiSaab combines **group expense splitting**, **daily utility tracking (tiffin subscriptions)**, **personal finance & monthly budgets**, and **visual analytics** into a single sleek application with a CRED and Spotify-inspired dark aesthetic.
 
@@ -41,11 +41,10 @@ Unlike generic expense splitters, hiSaab combines **group expense splitting**, *
 - **Victory XL Powered Charts:** Interactive spend breakdown charts, donut category views, and historical spending trends.
 - **Financial Health Overview:** Real-time visibility into overall net balance, group liabilities, and monthly savings.
 
-### 📶 5. Offline-First Sync & Resilience
+### 🌐 5. Real-Time Cloud Sync & Network Monitoring
 
-- **Local Mutation Queue:** Log expenses, update tiffin records, and settle payments even without an active internet connection.
-- **Background Sync:** Seamless background synchronization when network connection is restored powered by Zustand persistence.
-- **Network Status Banner:** Real-time connectivity banner alerting users of sync states.
+- **Real-Time Supabase Sync:** Instant cloud database synchronization for expenses, splits, tiffin logs, and budget updates.
+- **Network Status Banner:** Real-time connectivity banner alerting users of active network status.
 
 ### 🔔 6. Notifications & Micro-Interactions
 
@@ -63,7 +62,7 @@ Unlike generic expense splitters, hiSaab combines **group expense splitting**, *
 | **Routing**       | [Expo Router](https://docs.expo.dev/router/introduction/)                                   | File-system based router with type-safe screen navigation             |
 | **Language**      | [TypeScript](https://www.typescriptlang.org/)                                               | Strict static typing across components, models, and stores            |
 | **Styling**       | [NativeWind v4](https://www.nativewind.dev/)                                                | Tailwind CSS compiler for React Native UI primitives                  |
-| **State & Cache** | [Zustand](https://github.com/pmndrs/zustand) + [TanStack Query](https://tanstack.com/query) | Client state, persisted offline action queue & remote server caching  |
+| **State & Cache** | [Zustand](https://github.com/pmndrs/zustand) + [TanStack Query](https://tanstack.com/query) | Client state management & active server data fetching/caching         |
 | **Backend & DB**  | [Supabase](https://supabase.com/) (PostgreSQL)                                              | Auth, database engine with strict Row Level Security (RLS) policies   |
 | **Charts**        | [Victory Native XL](https://commerce.nearform.com/open-source/victory-native)               | High-performance canvas-rendered charts and graphs                    |
 | **Testing**       | [Jest](https://jestjs.io/)                                                                  | Comprehensive unit testing for financial formulas and math operations |
@@ -91,7 +90,7 @@ hiSaab-App/
 │   ├── constants/          # Design tokens, theme colors, typography definitions
 │   ├── hooks/              # Custom React hooks (Network, Haptics, Auth)
 │   ├── services/           # Supabase client API wrappers & push notifications
-│   ├── store/              # Zustand stores (Auth, Sync Queue, Theme, Toast, Network)
+│   ├── store/              # Zustand stores (Auth, Theme, Toast, Network)
 │   ├── types/              # Database models, API responses, and TypeScript interfaces
 │   └── utils/              # Financial math, currency formatting, date utilities
 ├── supabase/
